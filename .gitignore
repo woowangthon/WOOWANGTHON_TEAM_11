@@ -1,4 +1,4 @@
-# 대회 로컬 자료 — 커밋 금지
+
 2026 AI 우왕톤 · 킥오프.pdf
 우왕톤.md
 
@@ -30,7 +30,9 @@ venv/
 
 # tools
 .playwright-mcp/
-.claude/settings.local.json
+.claude/
+CLAUDE.md
+
 
 # os / editor
 .DS_Store
