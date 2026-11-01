@@ -1,7 +1,7 @@
 import { isProfileKey, isProfileValue } from './profile.ts';
 import type { Card, CardOption, Profile } from './types.ts';
 
-export const MAX_CARDS = 7;
+export const MAX_CARDS = 9;
 const MAX_OPTIONS = 4;
 
 /**
@@ -9,7 +9,9 @@ const MAX_OPTIONS = 4;
  * keys the rule presets read, so rules are still recommended correctly without AI.
  * The UI labels them as non-AI cards.
  */
-export const FALLBACK_CARDS: Card[] = [
+type RawCard = Omit<Card, 'kind' | 'options'> & { options: Omit<CardOption, 'policy'>[] };
+
+const RAW_FALLBACK: RawCard[] = [
   {
     id: 'platform',
     question: '어디에서 쓰는 앱인가요?',
@@ -49,6 +51,7 @@ export const FALLBACK_CARDS: Card[] = [
       { id: 'upload', label: '파일 업로드', detail: '사진·문서 올리기', recommended: false, sets: { upload: 'yes' } },
       { id: 'external', label: '외부 API 연동', detail: 'AI·지도·날씨 등', recommended: false, sets: { externalApi: 'yes' } },
       { id: 'payment', label: '결제', detail: '유료 기능·상품 판매', recommended: false, sets: { payment: 'yes' } },
+      { id: 'money', label: '돈 계산', detail: '벌금·정산·포인트', recommended: false, sets: { money: 'yes' } },
     ],
   },
   {
@@ -61,6 +64,12 @@ export const FALLBACK_CARDS: Card[] = [
     ],
   },
 ];
+
+export const FALLBACK_CARDS: Card[] = RAW_FALLBACK.map((c) => ({
+  ...c,
+  kind: 'tech',
+  options: c.options.map((o) => ({ ...o, policy: '' })),
+}));
 
 const str = (v: unknown, field: string, max: number): string => {
   if (typeof v !== 'string' || !v.trim()) throw new Error(`${field}: expected a non-empty string`);
@@ -121,6 +130,7 @@ function parseCard(c: unknown, where: string, id: string): Card {
       detail: typeof opt.detail === 'string' ? opt.detail.trim().slice(0, 80) : '',
       recommended: opt.recommended === true,
       sets: parseSets(opt.sets, w),
+      policy: typeof opt.policy === 'string' ? opt.policy.trim().slice(0, 200) : '',
     };
   });
   // Exactly one recommendation per card: the UI pre-selects it.
@@ -128,5 +138,9 @@ function parseCard(c: unknown, where: string, id: string): Card {
   options.forEach((o, j) => (o.recommended = j === (firstRec < 0 ? 0 : firstRec)));
   // ids are assigned here, not trusted from the model, so they are always unique
   const question = str(card.question, `${where}.question`, 80);
-  return { id, question, why: typeof card.why === 'string' ? card.why.trim().slice(0, 140) : '', options };
+  // Anything not explicitly "domain" is treated as a tech card, so a missing field cannot
+  // promote a stray card into the spec's business rules.
+  const kind = card.kind === 'domain' ? 'domain' : 'tech';
+  if (kind === 'tech') options.forEach((o) => (o.policy = ''));
+  return { id, kind, question, why: typeof card.why === 'string' ? card.why.trim().slice(0, 140) : '', options };
 }

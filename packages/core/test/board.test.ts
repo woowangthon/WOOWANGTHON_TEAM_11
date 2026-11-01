@@ -64,7 +64,7 @@ test('markdown export reflects columns and ticks', () => {
 });
 
 test('watch-outs reach the coding agent; human checks stay out of the spec', () => {
-  const spec = buildSpec({ request: 'r', summary: '', notes: '', decisions: [], rules: [], stack: [], tasks });
+  const spec = buildSpec({ request: 'r', summary: '', domainRules: [], notes: '', decisions: [], rules: [], stack: [], tasks });
   assert.match(spec, /Watch out: 세션 만료/);
   assert.doesNotMatch(spec, /다른 계정 접근/);
 });

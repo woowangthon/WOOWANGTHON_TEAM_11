@@ -6,20 +6,20 @@ export const ENGINEERING_RULES: Rule[] = [
   {
     id: 'eng-structure',
     category: 'engineering',
-    title: '폴더 구조를 먼저 정하고 지키기',
-    instructionKo: '기능을 만들기 전에 폴더 구조를 먼저 만들고 지킨다: 순수 로직은 `src/core/`(UI·네트워크 없음), 화면은 `src/ui/`, 외부 호출은 `src/services/`. 비즈니스 로직을 UI 컴포넌트 안에 넣지 않는다.',
+    title: '역할별로 나눠 두기',
+    instructionKo: '기능을 만들기 전에 역할별 위치를 정한다: 비즈니스 규칙(계산·검증)은 화면·네트워크와 분리된 모듈에, 화면은 UI 폴더에, 외부 호출은 서비스 모듈에 둔다. 폴더 이름은 프레임워크 관례를 따라도 되지만, 비즈니스 규칙이 UI 컴포넌트 안에 섞이지 않게 한다.',
     instruction:
-      'Before writing features, create the folder layout below and keep to it: pure logic in `src/core/` (no UI, no network), UI in `src/ui/`, external calls in `src/services/`. Do not put business logic inside UI components.',
+      'Before writing features, decide where each kind of code lives: business rules (calculations, validation) in modules with no UI or network code, UI in its own folder, external calls in service modules. Follow the framework\'s conventions for folder names, but keep business rules out of UI components.',
     why: '구조 없이 시작하면 기능이 한 파일에 쌓여서, 나중에 고칠 때 AI가 전체를 다시 읽느라 토큰을 씁니다.',
     appliesTo: () => '모든 프로젝트에 적용',
   },
   {
     id: 'eng-file-size',
     category: 'engineering',
-    title: '파일 하나는 300줄 이하',
-    instructionKo: '모든 소스 파일은 300줄 미만으로 유지한다. 한계에 가까워지면 기능을 더하기 전에 책임별로 나눈다.',
+    title: '파일은 한 가지 책임만',
+    instructionKo: '파일 하나는 한 가지 책임만 갖게 한다. 파일이 길어지는 것(대략 300줄 이상)은 책임이 섞였다는 신호이니 그때 나눌지 판단한다. 줄 수 자체가 목표는 아니며, 응집된 파일을 줄 수만 보고 쪼개지 않는다.',
     instruction:
-      'Keep every source file under 300 lines. When a file approaches the limit, split it by responsibility before adding more.',
+      'Give each file one responsibility. Treat a file growing past roughly 300 lines as a signal to check whether it mixes responsibilities, and split it if it does. Line count is a prompt to look, not a target: do not split a cohesive file just to get under a number.',
     why: '긴 파일은 수정할 때마다 통째로 다시 읽혀서 토큰이 새고, 스파게티 코드의 출발점이 됩니다.',
     appliesTo: () => '모든 프로젝트에 적용',
   },
@@ -66,10 +66,10 @@ export const ENGINEERING_RULES: Rule[] = [
   {
     id: 'eng-single-source',
     category: 'engineering',
-    title: '데이터는 한 곳에만 저장',
-    instructionKo: '각 상태는 정확히 한 곳에만 저장하고 나머지는 거기서 계산한다. 함께 갱신해야 하는 복사본을 두지 않는다.',
+    title: '같은 사실을 두 번 저장하지 않기',
+    instructionKo: '같은 사실을 두 곳에 저장하지 않고, 원본에서 계산할 수 있는 값(합계, 개수, 상태 표시 등)은 저장하지 말고 계산한다. 캐시처럼 일부러 복사할 때는 무엇이 원본이고 언제 갱신되는지 주석으로 남긴다.',
     instruction:
-      'Store each piece of state in exactly one place and derive everything else from it. Never keep a copy that must be updated in sync.',
+      'Do not store the same fact in two places, and compute values that can be derived from the source (totals, counts, status labels) instead of storing them. When you do keep a copy on purpose, such as a cache, note which value is the source and when the copy is refreshed.',
     why: '같은 값을 두 곳에 두면 한쪽만 바뀌는 순간 화면과 데이터가 어긋납니다.',
     appliesTo: (p) => (p.storage !== 'none' ? '데이터를 저장하는 앱' : null),
   },

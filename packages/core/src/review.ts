@@ -36,8 +36,14 @@ const STATIC: Record<string, (code: string) => Omit<Finding, 'ruleId' | 'by'> | 
     if (parts.length === 1) files.push({ name: '(붙여넣은 코드)', lines: code.split('\n').length });
     for (let i = 1; i < parts.length; i += 2) files.push({ name: parts[i], lines: parts[i + 1].split('\n').length });
     const long = files.filter((f) => f.lines > 300);
+    // Length is a signal, not a breach: the rule is one responsibility per file, which a line
+    // count cannot decide. So this flags the file for a look instead of calling it a violation.
     return long.length
-      ? { verdict: 'violation', evidence: long.map((f) => `${f.name}: ${f.lines}줄`).join(', '), fix: '책임별로 파일을 나누세요.' }
+      ? {
+          verdict: 'unclear',
+          evidence: long.map((f) => `${f.name}: ${f.lines}줄`).join(', '),
+          fix: '이 파일이 여러 책임을 섞고 있는지 확인하고, 섞였다면 책임별로 나누세요.',
+        }
       : null;
   },
 };
@@ -85,7 +91,12 @@ export function parseFindings(raw: unknown, ruleIds: Set<string>): Finding[] {
 /** Rule-found violations win; the model fills in every rule a pattern cannot decide. */
 export function mergeFindings(fromRules: Finding[], fromAi: Finding[]): Finding[] {
   const byRule = new Map(fromRules.map((f) => [f.ruleId, f]));
-  for (const f of fromAi) if (!byRule.has(f.ruleId)) byRule.set(f.ruleId, f);
+  for (const f of fromAi) {
+    // A pattern-confirmed violation stands; a pattern that only says "take a look" (long file)
+    // gives way to the model, which can judge what the pattern cannot (cohesion).
+    const existing = byRule.get(f.ruleId);
+    if (!existing || existing.verdict !== 'violation') byRule.set(f.ruleId, f);
+  }
   return [...byRule.values()];
 }
 

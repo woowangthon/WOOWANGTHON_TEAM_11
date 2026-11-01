@@ -39,7 +39,7 @@ export function parsePlan(raw: unknown): Plan {
     const item = s as Record<string, unknown>;
     const area = text(item?.area, 30);
     const choice = text(item?.choice, 60);
-    return area && choice ? [{ area, choice, why: text(item.why, 120) }] : [];
+    return area && choice ? [{ area, choice, why: text(item.why, 140), connects: text(item.connects, 160) }] : [];
   });
   return { tasks, stack, budget: parseBudget(obj.budget) };
 }
@@ -67,14 +67,21 @@ export function fallbackPlan(profile: Profile): Plan {
 /** Widely used, free-tier-friendly defaults per profile trait. */
 export function fallbackStack(profile: Profile): StackItem[] {
   const stack: StackItem[] = [];
-  const add = (area: string, choice: string, why: string) => stack.push({ area, choice, why });
+  const add = (area: string, choice: string, why: string, connects = '') => stack.push({ area, choice, why, connects });
   if (profile.platform === 'web') add('화면', 'React + Vite (TypeScript)', '자료와 AI 학습량이 가장 많아 코딩 AI가 잘 다룸');
   if (profile.platform === 'mobile') add('화면', 'React Native (Expo)', '한 코드로 안드로이드·iOS, 설치 없이 미리보기 가능');
   if (profile.platform === 'desktop') add('화면', 'Electron + React', '웹 기술 그대로 PC 앱으로 배포');
   if (profile.platform === 'cli') add('실행 환경', 'Node.js (TypeScript)', '설치가 쉽고 패키지가 많음');
   if (profile.storage === 'local') add('데이터 저장', profile.platform === 'mobile' ? 'AsyncStorage' : 'IndexedDB (Dexie)', '서버 없이 기기에 저장');
   if (profile.storage === 'server-db') add('데이터 저장', 'Supabase (Postgres)', '무료 티어, 행 수준 보안(RLS) 기본 제공');
-  if (profile.auth !== 'none') add('로그인', 'Supabase Auth', '비밀번호 해시·소셜 로그인을 직접 구현하지 않아도 됨');
+  if (profile.auth !== 'none') {
+    add(
+      '로그인',
+      profile.storage === 'server-db' ? 'Supabase Auth' : 'Supabase Auth (로그인만)',
+      '비밀번호 해시·소셜 로그인을 직접 구현하지 않아도 됨',
+      profile.storage === 'server-db' ? 'DB와 같은 Supabase 프로젝트라 로그인 사용자 기준으로 행 단위 접근 규칙(RLS)을 바로 걸 수 있음' : '',
+    );
+  }
   if (profile.payment === 'yes') add('결제', 'Toss Payments', '국내 결제수단, 웹훅으로 서버 검증');
   if (profile.platform === 'web') add('배포', 'Vercel', '무료로 시작, Git 연결만으로 자동 배포');
   return stack.slice(0, MAX_STACK);
@@ -114,4 +121,26 @@ export function fallbackBudget(profile: Profile): Budget {
         : '개발·시험은 무료로 가능하지만, 외부 API 사용량이나 결제·앱 스토어 비용이 생깁니다.',
     items,
   };
+}
+
+const AUTH_PROVIDERS = /supabase|firebase|appwrite|pocketbase/i;
+const AUTH_LIBRARIES = /next-?auth|auth\.js|clerk|lucia|passport|auth0|kinde/i;
+
+/** Overlaps a person should resolve before building; empty when the picks are consistent. */
+export function stackWarnings(stack: StackItem[]): string[] {
+  const warnings: string[] = [];
+  const seen = new Map<string, string>();
+  for (const s of stack) {
+    const prev = seen.get(s.area);
+    if (prev) warnings.push(`'${s.area}'에 ${prev}와 ${s.choice}가 함께 추천됐어요. 하나로 정하세요.`);
+    else seen.set(s.area, s.choice);
+  }
+  const provider = stack.find((s) => AUTH_PROVIDERS.test(s.choice));
+  const library = stack.find((s) => AUTH_LIBRARIES.test(s.choice));
+  if (provider && library) {
+    warnings.push(
+      `${provider.choice}도 로그인 기능이 있는데 ${library.choice}를 따로 쓰도록 추천됐어요. 사용자 계정과 데이터 권한을 어느 쪽이 관리할지 정해야 합니다.`,
+    );
+  }
+  return warnings;
 }

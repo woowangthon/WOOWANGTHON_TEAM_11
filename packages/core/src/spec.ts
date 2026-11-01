@@ -6,6 +6,8 @@ export interface SpecInput {
   request: string;
   summary: string;
   decisions: Decision[];
+  /** Business rules settled on domain cards, one sentence each. */
+  domainRules: string[];
   /** Free text the owner added after the cards; empty when none. */
   notes: string;
   rules: Rule[];
@@ -19,6 +21,8 @@ const HEADINGS = {
     goal: '## Goal',
     decisions: '## Decisions already made',
     decisionsNote: 'These were decided by the owner. Do not change them; ask if one blocks you.',
+    domain: '## Domain rules',
+    domainNote: 'Business rules decided by the owner. Implement them exactly and keep them in the business-logic layer, not in UI code.',
     notes: '## Additional notes from the owner',
     engineering: '## Engineering rules',
     security: '## Security rules',
@@ -40,6 +44,8 @@ const HEADINGS = {
     goal: '## 목표',
     decisions: '## 이미 정한 것',
     decisionsNote: '주인이 정한 내용입니다. 바꾸지 말고, 막히면 질문하세요.',
+    domain: '## 도메인 규칙',
+    domainNote: '주인이 정한 비즈니스 규칙입니다. 그대로 구현하고, 화면 코드가 아니라 비즈니스 로직 쪽에 두세요.',
     notes: '## 주인이 덧붙인 말',
     engineering: '## 유지보수 규칙',
     security: '## 보안 규칙',
@@ -66,7 +72,7 @@ const HEADINGS = {
  */
 export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
   const h = HEADINGS[lang];
-  const { request, summary, decisions, notes, rules, tasks, stack } = input;
+  const { request, summary, decisions, domainRules, notes, rules, tasks, stack } = input;
   const level = (d: Difficulty) => (lang === 'en' ? `difficulty: ${h.difficulty[d]}` : `난이도: ${h.difficulty[d]}`);
   const section = (category: Rule['category']) =>
     rules.filter((r) => r.category === category).map((r) => `- ${lang === 'en' ? r.instruction : r.instructionKo}`);
@@ -84,6 +90,7 @@ export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
     h.decisionsNote,
     ...decisions.map((d) => `- ${d.question} → **${d.answer}**`),
   ];
+  if (domainRules.length) lines.push('', h.domain, h.domainNote, ...domainRules.map((r) => `- ${r}`));
   if (notes.trim()) lines.push('', h.notes, notes.trim());
   if (engineering.length) lines.push('', h.engineering, ...engineering);
   if (security.length) lines.push('', h.security, ...security);
@@ -114,6 +121,7 @@ export function translatableTexts(input: SpecInput): string[] {
     input.summary,
     input.notes,
     ...input.decisions.flatMap((d) => [d.question, d.answer]),
+    ...input.domainRules,
     ...input.tasks.flatMap((t) => [t.title, t.done, t.reason, ...t.watchouts, ...t.securityChecks.flatMap((c) => [c.what, c.how])]),
     ...input.stack.flatMap((s) => [s.area, s.why]),
   ];
@@ -132,6 +140,7 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
     summary: next(),
     notes: next(),
     decisions: input.decisions.map(() => ({ question: next(), answer: next() })),
+    domainRules: input.domainRules.map(() => next()),
     tasks: input.tasks.map((t) => ({
       ...t,
       title: next(),

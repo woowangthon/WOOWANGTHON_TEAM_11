@@ -8,6 +8,8 @@ export const PROFILE_SCHEMA = {
   users: ['single', 'multi'],
   upload: ['no', 'yes'],
   payment: ['no', 'yes'],
+  /** Money, fines, points or balances change hands or get calculated, with or without a payment provider. */
+  money: ['no', 'yes'],
   externalApi: ['no', 'yes'],
   stage: ['prototype', 'production'],
 } as const;
@@ -23,6 +25,7 @@ export const DEFAULT_PROFILE: Profile = {
   users: 'single',
   upload: 'no',
   payment: 'no',
+  money: 'no',
   externalApi: 'no',
   stage: 'prototype',
 };
@@ -33,10 +36,16 @@ export interface CardOption {
   detail: string;
   recommended: boolean;
   sets: Partial<Profile>;
+  /** For a domain card: the rule this choice fixes, as one sentence for the spec. Empty for tech cards. */
+  policy: string;
 }
+
+/** 'domain' cards settle business rules (who may change a fine); 'tech' cards settle infrastructure. */
+export type CardKind = 'domain' | 'tech';
 
 export interface Card {
   id: string;
+  kind: CardKind;
   question: string;
   why: string;
   options: CardOption[];
@@ -104,7 +113,10 @@ export interface StackItem {
   area: string;
   /** A product or library name; never translated. */
   choice: string;
+  /** Its role in this app. */
   why: string;
+  /** How it works with the other picks (e.g. which one owns login). */
+  connects: string;
 }
 
 export const FREE_TIERS = ['full', 'partial', 'none'] as const;
