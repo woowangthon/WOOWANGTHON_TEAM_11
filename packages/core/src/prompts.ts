@@ -28,13 +28,16 @@ export function cardsUser(request: string): string {
 export const TASKS_SYSTEM = `You turn a decided app specification into an ordered build plan for an AI coding agent, and recommend a tech stack.
 Return JSON only:
 {"tasks": [{"title": string, "done": string, "difficulty": "easy" | "medium" | "hard", "reason": string,
-            "watchouts": [string], "humanChecks": [{"what": string, "how": string}]}],
- "stack": [{"area": string, "choice": string, "why": string}]}
+            "watchouts": [string], "securityChecks": [{"what": string, "how": string}]}],
+ "stack": [{"area": string, "choice": string, "why": string}],
+ "budget": {"freeTier": "full" | "partial" | "none", "monthly": string, "summary": string,
+            "items": [{"name": string, "free": string, "paid": string}]}}
 - 4 to 10 tasks, smallest working version first, each finishable in one session.
 - "title" is an imperative instruction in Korean. "done" is a checkable completion condition in Korean.
 - "difficulty" estimates how hard the task is for a non-developer working with an AI coding agent; "reason" explains concretely why, in one or two Korean sentences.
 - "watchouts": 1 to 3 specific problems this task must handle (edge cases, failure modes, security traps), in Korean.
-- "humanChecks": 0 to 2 things an AI cannot be trusted to judge for this task and a person must verify (e.g. whether a secret leaked, whether real users would understand a screen, whether money or personal data is handled correctly). "how" gives concrete steps a non-developer can follow, in Korean.
+- "securityChecks": SECURITY ONLY, usually empty. Include an item only when this task creates a real security or privacy risk that a non-developer must verify by hand because the AI cannot be trusted to judge it (a secret committed or exposed, personal data visible to others, money handled wrongly). Never include ordinary "does the feature work" checks. "how" gives concrete steps a non-developer can follow, in Korean.
+- "budget": a realistic running-cost estimate for this app with the recommended stack, at small scale (about 100 users). "freeTier" says whether it can run entirely on free tiers. "monthly" is a KRW range (e.g. "0원", "0원~1만원"). "items" lists each paid-capable service with what its free tier covers and what paid costs, in Korean. "summary" says in one Korean sentence how far the free tier goes and what pushes it to paid.
 - 3 to 6 stack items: "area" in Korean (e.g. 화면, 데이터 저장, 로그인, 배포), "choice" a concrete product or library name, "why" one short Korean sentence. Prefer free-tier, widely used options that coding agents know well.
 - The stack must not contradict the decisions (e.g. no server database when the owner chose device storage).
 - Respect every decision and rule given. Do not add features that were not requested.`;

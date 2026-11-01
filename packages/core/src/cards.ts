@@ -88,35 +88,45 @@ export function parseCards(raw: unknown): { summary: string; cards: Card[] } {
   const obj = raw as Record<string, unknown>;
   if (!Array.isArray(obj.cards) || obj.cards.length === 0) throw new Error('cards: expected a non-empty array');
 
+  // One malformed card (say, a single option) is dropped rather than discarding the whole
+  // answer for the fallback cards. Only when no card survives does the call count as failed.
   const seen = new Set<string>();
-  const cards = obj.cards.slice(0, MAX_CARDS).map((c, i): Card => {
-    const where = `cards[${i}]`;
-    if (typeof c !== 'object' || c === null) throw new Error(`${where}: expected an object`);
-    const card = c as Record<string, unknown>;
-    const id = `c${i + 1}`; // ids are assigned here, not trusted from the model, so they are always unique
-    if (!Array.isArray(card.options) || card.options.length < 2) throw new Error(`${where}.options: need at least 2`);
-
-    const options = card.options.slice(0, MAX_OPTIONS).map((o, j): CardOption => {
-      const w = `${where}.options[${j}]`;
-      if (typeof o !== 'object' || o === null) throw new Error(`${w}: expected an object`);
-      const opt = o as Record<string, unknown>;
-      return {
-        id: `o${j + 1}`,
-        label: str(opt.label, `${w}.label`, 40),
-        detail: typeof opt.detail === 'string' ? opt.detail.trim().slice(0, 80) : '',
-        recommended: opt.recommended === true,
-        sets: parseSets(opt.sets, w),
-      };
-    });
-    // Exactly one recommendation per card: the UI pre-selects it.
-    const firstRec = options.findIndex((o) => o.recommended);
-    options.forEach((o, j) => (o.recommended = j === (firstRec < 0 ? 0 : firstRec)));
-
-    const question = str(card.question, `${where}.question`, 80);
-    if (seen.has(question)) throw new Error(`${where}: duplicate question`);
-    seen.add(question);
-    return { id, question, why: typeof card.why === 'string' ? card.why.trim().slice(0, 140) : '', options };
+  const cards: Card[] = [];
+  const errors: string[] = [];
+  obj.cards.slice(0, MAX_CARDS).forEach((c, i) => {
+    try {
+      const card = parseCard(c, `cards[${i}]`, `c${cards.length + 1}`);
+      if (seen.has(card.question)) throw new Error(`cards[${i}]: duplicate question`);
+      seen.add(card.question);
+      cards.push(card);
+    } catch (err) {
+      errors.push((err as Error).message);
+    }
   });
-
+  if (cards.length === 0) throw new Error(errors[0] ?? 'no usable cards');
   return { summary: typeof obj.summary === 'string' ? obj.summary.trim().slice(0, 200) : '', cards };
+}
+
+function parseCard(c: unknown, where: string, id: string): Card {
+  if (typeof c !== 'object' || c === null) throw new Error(`${where}: expected an object`);
+  const card = c as Record<string, unknown>;
+  if (!Array.isArray(card.options) || card.options.length < 2) throw new Error(`${where}.options: need at least 2`);
+  const options = card.options.slice(0, MAX_OPTIONS).map((o, j): CardOption => {
+    const w = `${where}.options[${j}]`;
+    if (typeof o !== 'object' || o === null) throw new Error(`${w}: expected an object`);
+    const opt = o as Record<string, unknown>;
+    return {
+      id: `o${j + 1}`,
+      label: str(opt.label, `${w}.label`, 40),
+      detail: typeof opt.detail === 'string' ? opt.detail.trim().slice(0, 80) : '',
+      recommended: opt.recommended === true,
+      sets: parseSets(opt.sets, w),
+    };
+  });
+  // Exactly one recommendation per card: the UI pre-selects it.
+  const firstRec = options.findIndex((o) => o.recommended);
+  options.forEach((o, j) => (o.recommended = j === (firstRec < 0 ? 0 : firstRec)));
+  // ids are assigned here, not trusted from the model, so they are always unique
+  const question = str(card.question, `${where}.question`, 80);
+  return { id, question, why: typeof card.why === 'string' ? card.why.trim().slice(0, 140) : '', options };
 }

@@ -114,7 +114,7 @@ export function translatableTexts(input: SpecInput): string[] {
     input.summary,
     input.notes,
     ...input.decisions.flatMap((d) => [d.question, d.answer]),
-    ...input.tasks.flatMap((t) => [t.title, t.done, t.reason, ...t.watchouts, ...t.humanChecks.flatMap((c) => [c.what, c.how])]),
+    ...input.tasks.flatMap((t) => [t.title, t.done, t.reason, ...t.watchouts, ...t.securityChecks.flatMap((c) => [c.what, c.how])]),
     ...input.stack.flatMap((s) => [s.area, s.why]),
   ];
 }
@@ -138,7 +138,7 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
       done: next(),
       reason: next(),
       watchouts: t.watchouts.map(() => next()),
-      humanChecks: t.humanChecks.map(() => ({ what: next(), how: next() })),
+      securityChecks: t.securityChecks.map(() => ({ what: next(), how: next() })),
     })),
     stack: input.stack.map((s) => ({ ...s, area: next(), why: next() })),
   };

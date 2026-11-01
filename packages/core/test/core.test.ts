@@ -176,7 +176,7 @@ test('withTexts is the exact inverse of translatableTexts', () => {
   const input = {
     request: 'r', summary: '', notes: 'n', rules: [],
     decisions: [{ question: 'q', answer: 'a' }],
-    tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why', watchouts: ['w1'], humanChecks: [{ what: 'hw', how: 'hh' }] }],
+    tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why', watchouts: ['w1'], securityChecks: [{ what: 'hw', how: 'hh' }] }],
     stack: [{ area: '화면', choice: 'React', why: 'w' }],
   };
   assert.deepEqual(withTexts(input, translatableTexts(input)), input);
@@ -228,10 +228,21 @@ test('the fallback stack never contradicts the storage decision', () => {
 test('the spec shows each task difficulty and the stack in both languages', () => {
   const input = {
     request: 'r', summary: '', notes: '', decisions: [], rules: [],
-    tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '', watchouts: ['Handle empty input'], humanChecks: [{ what: 'secret', how: 'search' }] }],
+    tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '', watchouts: ['Handle empty input'], securityChecks: [{ what: 'secret', how: 'search' }] }],
     stack: [{ area: '화면', choice: 'React', why: '' }],
   };
   assert.match(buildSpec(input, 'en'), /\[difficulty: hard\]/);
   assert.match(buildSpec(input, 'en'), /## Recommended stack[\s\S]*\*\*React\*\*/);
   assert.match(buildSpec(input, 'ko'), /\[난이도: 상\]/);
+});
+
+test('one malformed card is dropped instead of discarding every card', () => {
+  const { cards } = parseCards({
+    cards: [
+      { question: 'q1', options: [{ label: 'a' }, { label: 'b' }] },
+      { question: 'q2', options: [{ label: 'only one' }] },
+      { question: 'q3', options: [{ label: 'a' }, { label: 'b' }] },
+    ],
+  });
+  assert.deepEqual(cards.map((c) => [c.id, c.question]), [['c1', 'q1'], ['c2', 'q3']]);
 });
