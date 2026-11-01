@@ -40,3 +40,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# build output
+.vercel/
+apps/web/dist/

@@ -15,7 +15,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "esbuild": "^0.25.0"
   },
   "overrides": {
     "rollup": "4.64.9"
