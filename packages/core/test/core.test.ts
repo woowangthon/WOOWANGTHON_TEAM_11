@@ -176,7 +176,7 @@ test('withTexts is the exact inverse of translatableTexts', () => {
   const input = {
     request: 'r', summary: '', notes: 'n', rules: [],
     decisions: [{ question: 'q', answer: 'a' }],
-    tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why' }],
+    tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why', watchouts: ['w1'], humanChecks: [{ what: 'hw', how: 'hh' }] }],
     stack: [{ area: '화면', choice: 'React', why: 'w' }],
   };
   assert.deepEqual(withTexts(input, translatableTexts(input)), input);
@@ -228,7 +228,7 @@ test('the fallback stack never contradicts the storage decision', () => {
 test('the spec shows each task difficulty and the stack in both languages', () => {
   const input = {
     request: 'r', summary: '', notes: '', decisions: [], rules: [],
-    tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '' }],
+    tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '', watchouts: ['Handle empty input'], humanChecks: [{ what: 'secret', how: 'search' }] }],
     stack: [{ area: '화면', choice: 'React', why: '' }],
   };
   assert.match(buildSpec(input, 'en'), /\[difficulty: hard\]/);

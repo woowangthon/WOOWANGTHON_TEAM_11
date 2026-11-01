@@ -1,8 +1,10 @@
 import { DIFFICULTIES } from './types.ts';
-import type { Difficulty, Plan, Profile, StackItem, Task } from './types.ts';
+import type { Difficulty, HumanCheck, Plan, Profile, StackItem, Task } from './types.ts';
 
 const MAX_TASKS = 10;
 const MAX_STACK = 6;
+const MAX_WATCHOUTS = 3;
+const MAX_HUMAN_CHECKS = 2;
 
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
@@ -19,7 +21,18 @@ export function parsePlan(raw: unknown): Plan {
       title: task.title.trim().slice(0, 120),
       done: text(task.done, 160),
       difficulty: task.difficulty as Difficulty,
-      reason: text(task.reason, 120),
+      reason: text(task.reason, 200),
+      watchouts: (Array.isArray(task.watchouts) ? task.watchouts : [])
+        .map((w) => text(w, 140))
+        .filter(Boolean)
+        .slice(0, MAX_WATCHOUTS),
+      humanChecks: (Array.isArray(task.humanChecks) ? task.humanChecks : [])
+        .flatMap((c): HumanCheck[] => {
+          const check = c as Record<string, unknown>;
+          const what = text(check?.what, 120);
+          return what ? [{ what, how: text(check.how, 240) }] : [];
+        })
+        .slice(0, MAX_HUMAN_CHECKS),
     };
   });
   const stack = (Array.isArray(obj.stack) ? obj.stack : []).slice(0, MAX_STACK).flatMap((s): StackItem[] => {
@@ -33,7 +46,10 @@ export function parsePlan(raw: unknown): Plan {
 
 /** A generic plan derived from the profile alone; used when the AI call fails. */
 export function fallbackPlan(profile: Profile): Plan {
-  const t = (title: string, done: string, difficulty: Difficulty, reason: string): Task => ({ title, done, difficulty, reason });
+  // The fallback carries no per-task guidance: the rule-based human checklist still applies.
+  const t = (title: string, done: string, difficulty: Difficulty, reason: string): Task => ({
+    title, done, difficulty, reason, watchouts: [], humanChecks: [],
+  });
   const tasks: Task[] = [
     t('규칙 파일의 폴더 구조대로 프로젝트 뼈대 만들기', '빈 화면이 실행되고 폴더 구조가 규칙과 일치함', 'easy', '템플릿으로 바로 시작 가능'),
     t('핵심 기능 하나를 저장 없이 화면에서 동작시키기', '새로고침 전까지 기능이 동작함', 'medium', '앱마다 다른 핵심 로직'),

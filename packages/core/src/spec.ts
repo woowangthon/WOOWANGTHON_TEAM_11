@@ -25,6 +25,7 @@ const HEADINGS = {
     plan: '## Build plan',
     planNote: 'Work through these in order. Finish and verify one before starting the next.',
     doneWhen: 'Done when',
+    watchOut: 'Watch out',
     difficulty: { easy: 'easy', medium: 'medium', hard: 'hard' },
     stack: '## Recommended stack',
     stackNote: 'Use these unless a decision above says otherwise.',
@@ -45,6 +46,7 @@ const HEADINGS = {
     plan: '## 작업 계획',
     planNote: '순서대로 진행하고, 하나를 끝내고 확인한 뒤 다음으로 넘어가세요.',
     doneWhen: '완료 조건',
+    watchOut: '주의',
     difficulty: { easy: '하', medium: '중', hard: '상' },
     stack: '## 추천 기술 스택',
     stackNote: '위에서 정한 것과 충돌하지 않는 한 이 스택을 쓰세요.',
@@ -90,7 +92,14 @@ export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
     '',
     h.plan,
     h.planNote,
-    ...tasks.map((t, i) => `${i + 1}. ${t.title} [${level(t.difficulty)}]${t.done ? `\n   - ${h.doneWhen}: ${t.done}` : ''}`),
+    // Watch-outs go to the agent; human checks do not: they are the owner's job, on the board.
+    ...tasks.map((t, i) =>
+      [
+        `${i + 1}. ${t.title} [${level(t.difficulty)}]`,
+        ...(t.done ? [`   - ${h.doneWhen}: ${t.done}`] : []),
+        ...t.watchouts.map((w) => `   - ${h.watchOut}: ${w}`),
+      ].join('\n'),
+    ),
     '',
     h.style,
     ...h.styleLines,
@@ -105,7 +114,7 @@ export function translatableTexts(input: SpecInput): string[] {
     input.summary,
     input.notes,
     ...input.decisions.flatMap((d) => [d.question, d.answer]),
-    ...input.tasks.flatMap((t) => [t.title, t.done, t.reason]),
+    ...input.tasks.flatMap((t) => [t.title, t.done, t.reason, ...t.watchouts, ...t.humanChecks.flatMap((c) => [c.what, c.how])]),
     ...input.stack.flatMap((s) => [s.area, s.why]),
   ];
 }
@@ -123,7 +132,14 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
     summary: next(),
     notes: next(),
     decisions: input.decisions.map(() => ({ question: next(), answer: next() })),
-    tasks: input.tasks.map((t) => ({ ...t, title: next(), done: next(), reason: next() })),
+    tasks: input.tasks.map((t) => ({
+      ...t,
+      title: next(),
+      done: next(),
+      reason: next(),
+      watchouts: t.watchouts.map(() => next()),
+      humanChecks: t.humanChecks.map(() => ({ what: next(), how: next() })),
+    })),
     stack: input.stack.map((s) => ({ ...s, area: next(), why: next() })),
   };
 }
