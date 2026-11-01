@@ -18,9 +18,14 @@ export function deriveProfile(cards: Card[], answers: Answers): Profile {
   const profile: Profile = { ...DEFAULT_PROFILE };
   for (const card of cards) {
     const chosen = answers[card.id];
-    // A typed answer cannot be mapped to profile values; the card leaves the profile as it was.
-    if (chosen === undefined || chosen === CUSTOM_ANSWER) continue;
-    const option = card.options.find((o) => o.id === chosen);
+    if (chosen === undefined) continue;
+    // A typed answer cannot be mapped to profile values. Falling back to the defaults would
+    // quietly drop rules (typing "admin logs in with a password" would read as "no login"),
+    // so it counts as the card's recommended option; the user can still toggle rules.
+    const option =
+      chosen === CUSTOM_ANSWER
+        ? (card.options.find((o) => o.recommended) ?? card.options[0])
+        : card.options.find((o) => o.id === chosen);
     if (!option) throw new Error(`answer "${chosen}" is not an option of card "${card.id}"`);
     Object.assign(profile, option.sets);
   }

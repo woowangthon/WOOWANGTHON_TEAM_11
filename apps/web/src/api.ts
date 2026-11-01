@@ -23,5 +23,14 @@ export const fetchCards = (request: string) =>
 
 export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
 
-export const fetchTasks =(input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile }) =>
+export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile; notes: string }) =>
   post<Generated<Task[]>>('/api/tasks', input);
+
+export interface TranslateResult {
+  lines: string[];
+  source: Source;
+  model: string | null;
+  error: string | null;
+}
+
+export const fetchTranslate = (lines: string[]) => post<TranslateResult>('/api/translate', { lines });

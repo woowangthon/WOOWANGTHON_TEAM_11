@@ -155,11 +155,14 @@ test('toDecisions refuses an unanswered card', () => {
   assert.throws(() => toDecisions(FALLBACK_CARDS, {}), /no answer/);
 });
 
-test('a typed answer becomes the decision text and leaves the profile alone', () => {
-  const answers = { ...recommendedAnswers(FALLBACK_CARDS), auth: CUSTOM_ANSWER };
-  const decisions = toDecisions(FALLBACK_CARDS, answers, { auth: '관리자 한 명만 비밀번호로' });
+test('a typed answer becomes the decision text and counts as the recommended option for rules', () => {
+  const cards = FALLBACK_CARDS.map((c) =>
+    c.id === 'auth' ? { ...c, options: c.options.map((o) => ({ ...o, recommended: o.id === 'email' })) } : c,
+  );
+  const answers = { ...recommendedAnswers(cards), auth: CUSTOM_ANSWER };
+  const decisions = toDecisions(cards, answers, { auth: '관리자 한 명만 비밀번호로' });
   assert.equal(decisions.find((d) => d.question.includes('로그인'))?.answer, '관리자 한 명만 비밀번호로');
-  assert.equal(deriveProfile(FALLBACK_CARDS, answers).auth, DEFAULT_PROFILE.auth);
+  assert.equal(deriveProfile(cards, answers).auth, 'email');
   assert.throws(() => toDecisions(FALLBACK_CARDS, answers, { auth: '  ' }), /비어 있습니다/);
 });
 

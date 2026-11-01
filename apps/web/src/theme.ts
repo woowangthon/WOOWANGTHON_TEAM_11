@@ -30,9 +30,9 @@ export function loadScheme(): Scheme {
     const saved = localStorage.getItem(KEY);
     if (saved === 'dark' || saved === 'light') return saved;
   } catch {
-    // Storage blocked (private mode): fall through to the OS preference.
+    // Storage blocked (private mode): fall through to the default.
   }
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  return 'dark';
 }
 
 export function saveScheme(scheme: Scheme): void {
