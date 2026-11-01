@@ -40,7 +40,7 @@
 ## 링크
 | 항목 | URL |
 |---|---|
-| 배포 | _운영진 Vercel 앱 승인 대기 (#3)_ |
+| 배포 | https://woowangthon-team-11.vercel.app |
 | 시연 영상 | _TBD (#4)_ |
 | Notion | _제출 전 공개 링크로 교체_ |
 
