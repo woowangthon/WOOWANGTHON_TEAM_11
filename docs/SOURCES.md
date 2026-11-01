@@ -24,4 +24,4 @@
 | Gemini Flash-Lite / Flash (무료 티어) | Google | 갈림길 카드 생성, 작업 계획 생성 |
 
 ## 설계 참고
-- 유지보수 규칙 일부는 팀원이 실제 프로젝트에서 쓰는 Claude Code 스킬(engineering-guardrails, ask-first)에서 가져와 일반화함
+- 유지보수 규칙 일부는 팀원이 만들어 실제 프로젝트에서 쓰는 Claude Code 스킬 [engineering-guardrails, ask-first](https://github.com/difficcd/skills-workshop)에서 가져와 일반화함
