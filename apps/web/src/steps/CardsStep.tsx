@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
 import { CUSTOM_ANSWER, MAX_CUSTOM_ANSWER_CHARS, MAX_NOTES_CHARS } from '@spec/core';
 import type { Answers, Card, CardKind, CustomAnswers, Generated } from '@spec/core';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
+import { Dots } from '../ui/PlanView.tsx';
 
 interface Props {
   result: Generated<{ summary: string; cards: Card[] }>;
@@ -32,7 +33,7 @@ export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, 
           <SourceBadge result={result} />
         </div>
         {summary && <p className="Muted">{summary}</p>}
-        <p className="Note">추천안이 미리 선택돼 있습니다. 다르게 하고 싶은 카드만 바꾸거나, 보기에 없으면 직접 입력하세요.</p>
+        <p className="Note">추천안이 미리 선택돼 있습니다. 보기마다 고르면 구현이 얼마나 어려워지는지(점 1~3개)가 함께 표시돼요. 다르게 하고 싶은 카드만 바꾸거나, 보기에 없으면 직접 입력하세요.</p>
       </section>
 
       {GROUPS.map(({ kind, title, blurb, icon: Icon }) => {
@@ -66,6 +67,10 @@ export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, 
                       {o.recommended && <span className="Rec">추천</span>}
                     </span>
                     {o.detail && <span className="OptionDetail">{o.detail}</span>}
+                    <span className="OptionCost">
+                      <Dots level={o.difficulty} />
+                      {o.effort && <span className="Note">{o.effort}</span>}
+                    </span>
                   </button>
                 );
               })}

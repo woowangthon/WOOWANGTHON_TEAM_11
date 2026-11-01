@@ -66,3 +66,9 @@ test('stack warnings catch a second login system next to a provider that has one
   assert.match(w[0], /어느 쪽이 관리할지/);
   assert.deepEqual(stackWarnings([{ area: '로그인', choice: 'Supabase Auth', why: '', connects: '' }]), []);
 });
+
+test('every option carries a difficulty; unknown levels fall back to medium', () => {
+  const { cards } = parseCards({ cards: [{ question: 'q', options: [{ label: 'a', difficulty: 'hard', effort: '웹훅' }, { label: 'b', difficulty: 'insane' }] }] });
+  assert.deepEqual(cards[0].options.map((o) => o.difficulty), ['hard', 'medium']);
+  assert.equal(cards[0].options[0].effort, '웹훅');
+});

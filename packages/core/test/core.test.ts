@@ -52,8 +52,8 @@ test('deriveProfile throws on an answer that is not an option', () => {
 
 test('choosing a login implies multiple users even if the card did not say so', () => {
   const cards = [{ id: 'c1', kind: 'tech' as const, question: 'q', why: '', options: [
-    { id: 'o1', label: 'a', detail: '', recommended: true, sets: { auth: 'email' as const }, policy: '' },
-    { id: 'o2', label: 'b', detail: '', recommended: false, sets: {}, policy: '' },
+    { id: 'o1', label: 'a', detail: '', recommended: true, sets: { auth: 'email' as const }, policy: '', difficulty: 'hard' as const, effort: '' },
+    { id: 'o2', label: 'b', detail: '', recommended: false, sets: {}, policy: '', difficulty: 'easy' as const, effort: '' },
   ] }];
   const profile = deriveProfile(cards, { c1: 'o1' });
   assert.equal(profile.users, 'multi');
