@@ -37,7 +37,8 @@ export function SpecStep({ input, translation, cardsResult, tasksResult, profile
   const korean = buildSpec(input, 'ko');
   const shown = lang === 'en' ? english : korean;
   const security = securityChecksFor(profile);
-  const securityCount = security.length + input.tasks.reduce((n, t) => n + t.securityChecks.length, 0);
+  const securityCount =
+    tasksResult.data.securityFocus.length + security.length + input.tasks.reduce((n, t) => n + t.securityChecks.length, 0);
 
   const TABS: { id: Tab; label: string; icon: typeof FileText; count?: number }[] = [
     { id: 'spec', label: '사양서', icon: FileText },
@@ -108,7 +109,7 @@ export function SpecStep({ input, translation, cardsResult, tasksResult, profile
       )}
       {tab === 'plan' && <PlanView result={tasksResult} />}
       {tab === 'budget' && <BudgetView result={tasksResult} />}
-      {tab === 'security' && <SecurityPanel rules={security} tasks={input.tasks} />}
+      {tab === 'security' && <SecurityPanel focus={tasksResult.data.securityFocus} rules={security} tasks={input.tasks} />}
 
       <div className="Row">
         <button className="Btn" onClick={onBack}><ArrowLeft size={15} /> 규칙 다시 고르기</button>
