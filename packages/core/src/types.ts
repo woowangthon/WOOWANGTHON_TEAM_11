@@ -86,8 +86,17 @@ export interface Task {
   done: string;
   /** An estimate for a vibe-coder working with an AI agent, not a commitment. */
   difficulty: Difficulty;
-  /** One line on why it is that hard. */
+  /** Why it is that hard, concretely. */
   reason: string;
+  /** Problems this task must deal with, so the agent (and the owner) do not skip them. */
+  watchouts: string[];
+  /** What only a person can judge here, each with how to check it. AI output is not trusted for these. */
+  humanChecks: HumanCheck[];
+}
+
+export interface HumanCheck {
+  what: string;
+  how: string;
 }
 
 export interface StackItem {

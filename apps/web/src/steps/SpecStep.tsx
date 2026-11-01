@@ -88,7 +88,7 @@ export function SpecStep({ input, translation, cardsResult, tasksResult, onBack,
       <div className="Row">
         <button className="Btn" onClick={onBack}><ArrowLeft size={15} /> 규칙 다시 고르기</button>
         <span className="Spacer" />
-        <button className="Btn primary" onClick={onReview}>만든 코드 점검 <ArrowRight size={15} /></button>
+        <button className="Btn primary" onClick={onReview}>작업 보드로 <ArrowRight size={15} /></button>
       </div>
     </>
   );

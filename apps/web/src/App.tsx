@@ -13,13 +13,15 @@ import { CardsStep } from './steps/CardsStep.tsx';
 import { RulesStep } from './steps/RulesStep.tsx';
 import { SpecStep } from './steps/SpecStep.tsx';
 import { ReviewStep } from './steps/ReviewStep.tsx';
+import { BoardStep } from './steps/BoardStep.tsx';
 
-type Step = 'request' | 'cards' | 'rules' | 'spec' | 'review';
+type Step = 'request' | 'cards' | 'rules' | 'spec' | 'board' | 'review';
 const STEPS: (NavStep<Step> & { title: string; desc: string })[] = [
   { id: 'request', label: '요청', title: '무엇을 만들고 싶나요', desc: '평소 말투 그대로 적으면, 해석이 갈리는 지점을 AI가 찾아 줍니다.' },
   { id: 'cards', label: '갈림길', title: '갈림길 정하기', desc: '추천안이 미리 골라져 있습니다. 다르게 하고 싶은 것만 바꾸세요.' },
   { id: 'rules', label: '규칙', title: '유지보수·보안 규칙', desc: '고른 내용에 맞춰 규칙 기반으로 추천합니다. 오른쪽 요약에 실시간 반영됩니다.' },
   { id: 'spec', label: '사양서', title: '코딩 AI용 사양서', desc: '영어본을 코딩 AI에게 주고, 한국어본으로 내용을 확인하세요.' },
+  { id: 'board', label: '보드', title: '작업 보드', desc: '작업을 보드로 관리합니다. AI를 그대로 믿지 않도록, 사람이 확인해야 완료로 옮길 수 있어요.' },
   { id: 'review', label: '점검', title: '만든 코드 점검', desc: '코딩 AI가 만든 코드가 규칙을 지켰는지 보고, 고칠 것만 골라 다시 요청합니다.' },
 ];
 
@@ -103,7 +105,7 @@ export function App() {
     setSpec(null);
   };
 
-  const reachedIndex = spec ? 4 : cardsResult ? 2 : 0;
+  const reachedIndex = spec ? STEPS.length - 1 : cardsResult ? 2 : 0;
 
   return (
     <>
@@ -153,10 +155,19 @@ export function App() {
               cardsResult={cardsResult}
               tasksResult={spec.tasks}
               onBack={() => setStep('rules')}
-              onReview={() => setStep('review')}
+              onReview={() => setStep('board')}
             />
           )}
-          {step === 'review' && <ReviewStep rules={selectedRules} onBack={() => setStep('spec')} />}
+          {step === 'board' && spec && (
+            <BoardStep
+              request={request}
+              tasks={spec.input.tasks}
+              profile={profile}
+              onBack={() => setStep('spec')}
+              onNext={() => setStep('review')}
+            />
+          )}
+          {step === 'review' && <ReviewStep rules={selectedRules} onBack={() => setStep('board')} />}
         </main>
         <Sidebar
           profile={cardsResult ? profile : null}
