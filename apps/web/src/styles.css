@@ -179,3 +179,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .Dot.on { background: var(--accent-color); }
 .DotLabel { font-size: 0.7rem; font-weight: 900; margin-left: 4px; }
 .StackGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; }
+.HumanCheck { font-size: 0.75rem; line-height: 1.5; padding: 0.35rem 0.55rem; border-radius: 8px; border-left: 3px solid var(--accent-color); background: color-mix(in srgb, var(--accent-color) 8%, transparent); }
+
+/* board */
+.Board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; align-items: start; }
+@media (max-width: 1100px) { .Board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .Board { grid-template-columns: minmax(0, 1fr); } }
+.Col { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.6rem; border-radius: 14px; background: color-mix(in srgb, var(--text-main) 4%, transparent); border: 1px solid var(--border-color); min-width: 0; min-height: 6rem; }
+.ColHead { display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; font-weight: 800; padding: 0.1rem 0.2rem; }
+.BCard { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.65rem; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border-color); min-width: 0; }
+.BCardTitle { font-size: 0.82rem; font-weight: 700; line-height: 1.4; }
+.CheckRow { display: flex; gap: 0.45rem; align-items: flex-start; text-align: left; background: transparent; border: none; padding: 0; color: var(--text-main); font-size: 0.73rem; line-height: 1.45; }
+.MoveRow { display: flex; gap: 0.3rem; justify-content: space-between; }
+.MiniBtn { padding: 0.2rem 0.5rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main); white-space: nowrap; }
+.MiniBtn:not(:disabled):hover { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.Steps { margin: 0.2rem 0 0; padding-left: 1.1rem; font-size: 0.74rem; color: var(--text-muted); line-height: 1.55; }

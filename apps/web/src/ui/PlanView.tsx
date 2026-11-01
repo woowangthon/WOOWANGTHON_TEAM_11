@@ -9,7 +9,7 @@ const LEVEL: Record<Difficulty, { label: string; dots: number }> = {
 };
 
 // Difficulty is shown as filled dots (intensity), not colours, per the monotone system.
-function Dots({ level }: { level: Difficulty }) {
+export function Dots({ level }: { level: Difficulty }) {
   return (
     <span className="Dots" aria-label={`난이도 ${LEVEL[level].label}`}>
       {[1, 2, 3].map((i) => <span key={i} className={`Dot${i <= LEVEL[level].dots ? ' on' : ''}`} />)}
@@ -42,7 +42,13 @@ export function PlanView({ result }: { result: Generated<Plan> }) {
               <span className="RuleBody">
                 <span className="RuleTitle">{t.title}</span>
                 {t.done && <span className="RuleWhy">완료 조건: {t.done}</span>}
-                {t.reason && <span className="Note">{t.reason}</span>}
+                {t.reason && <span className="RuleWhy"><b>왜 어려운가</b> · {t.reason}</span>}
+                {t.watchouts.length > 0 && (
+                  <span className="RuleWhy"><b>다룰 문제</b> · {t.watchouts.join(' / ')}</span>
+                )}
+                {t.humanChecks.map((c) => (
+                  <span key={c.what} className="HumanCheck"><b>사람만 판단</b> · {c.what} — {c.how}</span>
+                ))}
               </span>
               <Dots level={t.difficulty} />
             </li>
