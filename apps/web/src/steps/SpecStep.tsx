@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { ArrowLeft, ArrowRight, Copy, Download, Languages } from 'lucide-react';
 import { buildSpec, estimateTokens, withTexts } from '@spec/core';
-import type { Card, Generated, SpecInput, SpecLang, Task } from '@spec/core';
+import type { Card, Generated, Plan, SpecInput, SpecLang } from '@spec/core';
 import type { TranslateResult } from '../api.ts';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
+import { PlanView } from '../ui/PlanView.tsx';
 
 interface Props {
   /** In Korean, as the user and the cards wrote it. */
@@ -11,7 +12,7 @@ interface Props {
   /** English versions of translatableTexts(input), or the Korean ones back on failure. */
   translation: TranslateResult;
   cardsResult: Generated<{ summary: string; cards: Card[] }>;
-  tasksResult: Generated<Task[]>;
+  tasksResult: Generated<Plan>;
   onBack: () => void;
   onReview: () => void;
 }
@@ -57,6 +58,8 @@ export function SpecStep({ input, translation, cardsResult, tasksResult, onBack,
           <p className="Note">번역에 실패해서 영어본에도 한국어 문장이 남아 있습니다. 그대로 써도 동작합니다.</p>
         )}
       </section>
+
+      <PlanView result={tasksResult} />
 
       <section className="Panel">
         <div className="Row">

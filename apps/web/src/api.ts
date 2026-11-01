@@ -1,4 +1,4 @@
-import type { Card, Decision, Finding, Generated, Profile, Source, Task } from '@spec/core';
+import type { Card, Decision, Finding, Generated, Plan, Profile, Source } from '@spec/core';
 import { credentialHeaders } from './credentials.ts';
 
 export interface ReviewResult {
@@ -25,7 +25,7 @@ export const fetchCards = (request: string) =>
 export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
 
 export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile; notes: string }) =>
-  post<Generated<Task[]>>('/api/tasks', input);
+  post<Generated<Plan>>('/api/tasks', input);
 
 export interface TranslateResult {
   lines: string[];
