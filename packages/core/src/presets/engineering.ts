@@ -4,6 +4,17 @@ import type { Rule } from '../types.ts';
 // projects reliably break the same way without it; `why` says how, in user terms.
 export const ENGINEERING_RULES: Rule[] = [
   {
+    id: 'eng-scale',
+    category: 'engineering',
+    title: '많은 사용자를 전제로 만들기',
+    instructionKo:
+      '목록은 처음부터 페이지 단위로 불러오고, 자주 조회하는 조건에는 DB 인덱스를 만들고, 반복문 안에서 쿼리를 날리지(N+1) 않는다. 자주 읽고 드물게 바뀌는 데이터는 캐시한다. 최적화는 측정한 뒤에 하고, 무엇을 측정했는지 남긴다.',
+    instruction:
+      'Paginate every list from the start, index the columns used in frequent queries, and never query inside a loop (N+1). Cache data that is read often and changes rarely. Optimise only after measuring, and record what was measured.',
+    why: '사용자가 적을 때는 티가 안 나다가 많아지는 순간 느려지고, 그때 구조를 바꾸려면 대부분을 다시 써야 합니다.',
+    appliesTo: (p) => (p.scale === 'large' ? '수천 명 이상이 쓸 예정' : null),
+  },
+  {
     id: 'eng-structure',
     category: 'engineering',
     title: '역할별로 나눠 두기',

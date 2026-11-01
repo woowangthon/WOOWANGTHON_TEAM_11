@@ -3,9 +3,9 @@ import type { Budget, Generated, Plan } from '@spec/core';
 import { SourceBadge } from './SourceBadge.tsx';
 
 const VERDICT: Record<Budget['freeTier'], { label: string; note: string }> = {
-  full: { label: '무료로 운영 가능', note: '소규모(사용자 100명 안팎)라면 무료 티어만으로 충분합니다.' },
+  full: { label: '무료로 운영 가능', note: '가정한 규모에서는 무료 티어만으로 충분합니다.' },
   partial: { label: '일부 유료', note: '개발·시험은 무료지만 운영하면 비용이 생기는 항목이 있습니다.' },
-  none: { label: '유료 필요', note: '무료 티어만으로는 운영하기 어렵습니다.' },
+  none: { label: '유료 필요', note: '가정한 규모에서는 무료 티어만으로 운영하기 어렵습니다.' },
 };
 
 export function BudgetView({ result }: { result: Generated<Plan> }) {
@@ -18,6 +18,7 @@ export function BudgetView({ result }: { result: Generated<Plan> }) {
         <span className="Spacer" />
         <SourceBadge result={result} />
       </div>
+      <p className="Note">가정한 규모: <b>{budget.assumedScale}</b></p>
       <div className="BudgetHero">
         <div className="Stat">
           <span className="StatNum">{budget.monthly}</span>

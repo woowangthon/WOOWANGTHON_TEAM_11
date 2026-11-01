@@ -13,7 +13,7 @@ import {
   taskCheckKey,
   toggleCheck,
 } from '@spec/core';
-import type { BoardState, Column, Profile, Task } from '@spec/core';
+import type { BoardState, Column, FocusCheck, Profile, Task } from '@spec/core';
 import { Dots } from '../ui/PlanView.tsx';
 import { SecurityPanel } from '../ui/SecurityPanel.tsx';
 
@@ -38,12 +38,13 @@ function load(key: string): BoardState {
 interface Props {
   request: string;
   tasks: Task[];
+  focus: FocusCheck[];
   profile: Profile;
   onBack: () => void;
   onNext: () => void;
 }
 
-export function BoardStep({ request, tasks, profile, onBack, onNext }: Props) {
+export function BoardStep({ request, tasks, focus, profile, onBack, onNext }: Props) {
   const key = boardKey(request, tasks);
   const [state, setState] = useState<BoardState>(() => load(key));
   const [open, setOpen] = useState<number | null>(null);
@@ -73,7 +74,7 @@ export function BoardStep({ request, tasks, profile, onBack, onNext }: Props) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(boardMarkdown(state, tasks, rules));
+      await navigator.clipboard.writeText(boardMarkdown(state, tasks, rules, focus));
       setCopied('ok');
     } catch {
       setCopied('fail');
@@ -172,7 +173,7 @@ export function BoardStep({ request, tasks, profile, onBack, onNext }: Props) {
         </div>
       </div>
 
-      <SecurityPanel rules={rules} tasks={[]} checked={state.checked} onToggle={(k) => setState(toggleCheck(state, k))} />
+      <SecurityPanel focus={focus} rules={rules} tasks={[]} checked={state.checked} onToggle={(k) => setState(toggleCheck(state, k))} />
 
       <div className="Row">
         <button className="Btn" onClick={onBack}><ArrowLeft size={15} /> 사양서로</button>

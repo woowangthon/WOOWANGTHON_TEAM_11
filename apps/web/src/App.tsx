@@ -164,6 +164,7 @@ export function App() {
             <BoardStep
               request={request}
               tasks={spec.input.tasks}
+              focus={spec.tasks.data.securityFocus}
               profile={profile}
               onBack={() => setStep('spec')}
               onNext={() => setStep('review')}
@@ -175,6 +176,7 @@ export function App() {
           profile={cardsResult ? profile : null}
           rules={selectedRules}
           decided={cards.filter((c) => answers[c.id]).length}
+          skillPicks={spec?.tasks.source === 'ai' ? spec.tasks.data.skills : null}
         />
       </div>
     </>

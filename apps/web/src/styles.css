@@ -235,3 +235,4 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .Policy { margin: 0; font-size: 0.76rem; line-height: 1.5; padding: 0.45rem 0.65rem; border-radius: 8px; border-left: 3px solid var(--accent-color); background: color-mix(in srgb, var(--accent-color) 8%, transparent); }
 .OptionCost { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; padding-top: 0.35rem; border-top: 1px dashed var(--border-color); }
 .OptionCost .Dots { padding-top: 0; }
+.SubHead { margin: 0.3rem 0 0; font-size: 0.86rem; font-weight: 800; }

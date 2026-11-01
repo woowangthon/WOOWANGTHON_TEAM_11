@@ -1,6 +1,6 @@
 import { Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
-import { recommendSkills } from '@spec/core';
-import type { Profile, Rule } from '@spec/core';
+import { SKILLS, recommendSkills } from '@spec/core';
+import type { Profile, Rule, SkillPick } from '@spec/core';
 import { AiSettings } from './AiSettings.tsx';
 
 const PROFILE_LABEL: { [K in keyof Profile]?: Record<string, string> } = {
@@ -12,6 +12,7 @@ const PROFILE_LABEL: { [K in keyof Profile]?: Record<string, string> } = {
   money: { yes: '돈 계산' },
   externalApi: { yes: '외부 API' },
   stage: { prototype: '시제품', production: '실서비스' },
+  scale: { large: '대규모' },
 };
 
 interface Props {
@@ -19,13 +20,15 @@ interface Props {
   profile: Profile | null;
   rules: Rule[];
   decided: number;
+  /** Picks the AI tailored to this project once a plan exists; null before that or on fallback. */
+  skillPicks: SkillPick[] | null;
 }
 
 /**
  * Always-visible summary, so the engineering and security rules being applied are never
  * hidden behind a step the user has already left.
  */
-export function Sidebar({ profile, rules, decided }: Props) {
+export function Sidebar({ profile, rules, decided, skillPicks }: Props) {
   if (!profile) {
     return (
       <aside className="Side">
@@ -43,7 +46,13 @@ export function Sidebar({ profile, rules, decided }: Props) {
   const tags = (Object.keys(PROFILE_LABEL) as (keyof Profile)[])
     .map((k) => PROFILE_LABEL[k]?.[profile[k]])
     .filter((t): t is string => Boolean(t));
-  const skills = recommendSkills(profile);
+  // Tailored picks replace the profile-based ones once the plan exists; both come from the vetted catalog.
+  const skills = skillPicks?.length
+    ? skillPicks.flatMap((p) => {
+        const skill = SKILLS.find((s) => s.id === p.id);
+        return skill ? [{ skill, reason: p.reason || skill.what }] : [];
+      })
+    : recommendSkills(profile);
 
   return (
     <aside className="Side">
@@ -58,7 +67,7 @@ export function Sidebar({ profile, rules, decided }: Props) {
       </section>
 
       <section className="Panel">
-        <h3 className="SideTitle"><Blocks size={14} /> 추천 스킬</h3>
+        <h3 className="SideTitle"><Blocks size={14} /> 추천 스킬 {skillPicks?.length ? <span className="Badge">이 프로젝트 맞춤 · AI</span> : <span className="Badge fallback">기본 · 규칙 기반</span>}</h3>
         <ul className="MiniList">
           {skills.map(({ skill, reason }) => (
             <li key={skill.id} className="MiniItem">
