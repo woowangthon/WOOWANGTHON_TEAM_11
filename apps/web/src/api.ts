@@ -1,4 +1,11 @@
-import type { Card, Decision, Generated, Profile, Task } from '@spec/core';
+import type { Card, Decision, Finding, Generated, Profile, Source, Task } from '@spec/core';
+
+export interface ReviewResult {
+  findings: Finding[];
+  source: Source;
+  model: string | null;
+  error: string | null;
+}
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -14,5 +21,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 export const fetchCards = (request: string) =>
   post<Generated<{ summary: string; cards: Card[] }>>('/api/cards', { request });
 
-export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile }) =>
+export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
+
+export const fetchTasks =(input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile }) =>
   post<Generated<Task[]>>('/api/tasks', input);

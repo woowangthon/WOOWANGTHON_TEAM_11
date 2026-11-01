@@ -9,6 +9,7 @@ interface Props {
   tasksResult: Generated<Task[]>;
   onBack: () => void;
   onRestart: () => void;
+  onReview: () => void;
 }
 
 function download(name: string, text: string) {
@@ -18,7 +19,7 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-export function SpecStep({ input, cardsResult, tasksResult, onBack, onRestart }: Props) {
+export function SpecStep({ input, cardsResult, tasksResult, onBack, onRestart, onReview }: Props) {
   const spec = buildSpec(input);
   const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
 
@@ -70,6 +71,7 @@ export function SpecStep({ input, cardsResult, tasksResult, onBack, onRestart }:
         <button className="Btn" onClick={onBack}>← 규칙 다시 고르기</button>
         <span className="Spacer" />
         <button className="Btn" onClick={onRestart}>새 요청</button>
+        <button className="Btn primary" onClick={onReview}>만든 코드 점검 →</button>
       </div>
     </>
   );

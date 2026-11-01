@@ -7,6 +7,8 @@ import {
   generateTasks,
   parseDecisions,
   parseProfile,
+  reviewCode,
+  validateCode,
   validateRequest,
 } from '@spec/core';
 import type { LlmConfig } from '@spec/core';
@@ -52,6 +54,19 @@ export async function handleCards(raw: unknown, env: Env, clientId: string): Pro
     return badRequest(err);
   }
   return { status: 200, body: await generateCards(llmConfig(env), request) };
+}
+
+export async function handleReview(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+  if (rateLimited(clientId)) return tooMany;
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  let input;
+  try {
+    if (!Array.isArray(obj.ruleIds) || obj.ruleIds.length === 0) throw new Error('점검할 규칙을 하나 이상 골라 주세요.');
+    input = { code: validateCode(obj.code), rules: obj.ruleIds.map((id) => findRule(String(id))) };
+  } catch (err) {
+    return badRequest(err);
+  }
+  return { status: 200, body: await reviewCode(llmConfig(env), input.code, input.rules) };
 }
 
 export async function handleTasks(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {

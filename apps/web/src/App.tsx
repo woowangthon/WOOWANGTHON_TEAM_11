@@ -8,13 +8,15 @@ import { RequestStep } from './steps/RequestStep.tsx';
 import { CardsStep } from './steps/CardsStep.tsx';
 import { RulesStep } from './steps/RulesStep.tsx';
 import { SpecStep } from './steps/SpecStep.tsx';
+import { ReviewStep } from './steps/ReviewStep.tsx';
 
-type Step = 'request' | 'cards' | 'rules' | 'spec';
+type Step = 'request' | 'cards' | 'rules' | 'spec' | 'review';
 const STEPS: { id: Step; label: string }[] = [
   { id: 'request', label: '1 요청' },
   { id: 'cards', label: '2 갈림길' },
   { id: 'rules', label: '3 규칙' },
   { id: 'spec', label: '4 사양서' },
+  { id: 'review', label: '5 점검' },
 ];
 
 export function App() {
@@ -144,8 +146,10 @@ export function App() {
           tasksResult={tasksResult}
           onBack={() => setStep('rules')}
           onRestart={() => setStep('request')}
+          onReview={() => setStep('review')}
         />
       )}
+      {step === 'review' && <ReviewStep rules={selectedRules} onBack={() => setStep('spec')} />}
     </div>
   );
 }
