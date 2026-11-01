@@ -33,7 +33,12 @@ function devApi(env: Record<string, string>): Plugin {
           return;
         }
         const mod = await server.ssrLoadModule('/server/handlers.ts');
-        const result = await mod[name](body, env, req.socket.remoteAddress ?? 'local');
+        const web = await server.ssrLoadModule('/server/web.ts');
+        const header = (n: string) => {
+          const v = req.headers[n];
+          return Array.isArray(v) ? v[0] : v;
+        };
+        const result = await mod[name](body, env, req.socket.remoteAddress ?? 'local', web.readByok(header));
         res.statusCode = result.status;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(result.body));

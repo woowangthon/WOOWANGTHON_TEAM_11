@@ -1,6 +1,7 @@
 import { Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { recommendSkills } from '@spec/core';
 import type { Profile, Rule } from '@spec/core';
+import { AiSettings } from './AiSettings.tsx';
 
 const PROFILE_LABEL: { [K in keyof Profile]?: Record<string, string> } = {
   platform: { web: '웹', mobile: '모바일 앱', desktop: 'PC 프로그램', cli: '명령줄' },
@@ -27,10 +28,12 @@ export function Sidebar({ profile, rules, decided }: Props) {
   if (!profile) {
     return (
       <aside className="Side">
+        <span className="SideHead">실시간 요약</span>
         <section className="Panel">
           <h3 className="SideTitle"><Sparkles size={14} /> 프로젝트 요약</h3>
           <p className="Empty">앱 설명을 입력하면 여기에 정해진 것, 적용되는 유지보수·보안 규칙, 추천 스킬이 실시간으로 보입니다.</p>
         </section>
+        <AiSettings />
       </aside>
     );
   }
@@ -86,6 +89,7 @@ export function Sidebar({ profile, rules, decided }: Props) {
           ))}
         </ul>
       </section>
+      <AiSettings />
     </aside>
   );
 }

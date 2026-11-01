@@ -13,8 +13,9 @@ import {
   validateLines,
   validateNotes,
   validateRequest,
+  byokConfig,
 } from '@spec/core';
-import type { LlmConfig } from '@spec/core';
+import type { ByokInput, LlmConfig } from '@spec/core';
 
 export interface HandlerResult {
   status: number;
@@ -23,7 +24,14 @@ export interface HandlerResult {
 
 export type Env = Record<string, string | undefined>;
 
-export function llmConfig(env: Env): LlmConfig {
+/** Bring-your-own-key fields, read from request headers by the adapters. */
+export type Byok = ByokInput;
+export const NO_BYOK: Byok = { provider: null, key: null, model: null };
+
+/** The user's own key when one was sent (validated, fixed provider URL), else the server's. */
+export function llmConfig(env: Env, byok: Byok = NO_BYOK): LlmConfig {
+  const own = byokConfig(byok);
+  if (own) return own;
   return {
     baseUrl: env.LLM_BASE_URL || GEMINI_OPENAI_BASE,
     apiKey: env.LLM_API_KEY || env.GEMINI_API_KEY || '',
@@ -48,35 +56,41 @@ export function rateLimited(clientId: string, now = Date.now()): boolean {
 const badRequest = (err: unknown): HandlerResult => ({ status: 400, body: { error: (err as Error).message } });
 const tooMany: HandlerResult = { status: 429, body: { error: '요청이 너무 많습니다. 1분 뒤에 다시 시도해 주세요.' } };
 
-export async function handleCards(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+export async function handleCards(raw: unknown, env: Env, clientId: string, byok: Byok = NO_BYOK): Promise<HandlerResult> {
   if (rateLimited(clientId)) return tooMany;
   let request: string;
+  let llm: LlmConfig;
   try {
+    llm = llmConfig(env, byok);
     request = validateRequest((raw as Record<string, unknown>)?.request);
   } catch (err) {
     return badRequest(err);
   }
-  return { status: 200, body: await generateCards(llmConfig(env), request) };
+  return { status: 200, body: await generateCards(llm, request) };
 }
 
-export async function handleReview(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+export async function handleReview(raw: unknown, env: Env, clientId: string, byok: Byok = NO_BYOK): Promise<HandlerResult> {
   if (rateLimited(clientId)) return tooMany;
   const obj = (raw ?? {}) as Record<string, unknown>;
   let input;
+  let llm: LlmConfig;
   try {
+    llm = llmConfig(env, byok);
     if (!Array.isArray(obj.ruleIds) || obj.ruleIds.length === 0) throw new Error('점검할 규칙을 하나 이상 골라 주세요.');
     input = { code: validateCode(obj.code), rules: obj.ruleIds.map((id) => findRule(String(id))) };
   } catch (err) {
     return badRequest(err);
   }
-  return { status: 200, body: await reviewCode(llmConfig(env), input.code, input.rules) };
+  return { status: 200, body: await reviewCode(llm, input.code, input.rules) };
 }
 
-export async function handleTasks(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+export async function handleTasks(raw: unknown, env: Env, clientId: string, byok: Byok = NO_BYOK): Promise<HandlerResult> {
   if (rateLimited(clientId)) return tooMany;
   const obj = (raw ?? {}) as Record<string, unknown>;
   let input;
+  let llm: LlmConfig;
   try {
+    llm = llmConfig(env, byok);
     if (!Array.isArray(obj.ruleIds)) throw new Error('ruleIds: expected an array');
     input = {
       request: validateRequest(obj.request),
@@ -90,17 +104,19 @@ export async function handleTasks(raw: unknown, env: Env, clientId: string): Pro
   }
   return {
     status: 200,
-    body: await generateTasks(llmConfig(env), input.request, input.decisions, input.rules, input.profile, input.notes),
+    body: await generateTasks(llm, input.request, input.decisions, input.rules, input.profile, input.notes),
   };
 }
 
-export async function handleTranslate(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+export async function handleTranslate(raw: unknown, env: Env, clientId: string, byok: Byok = NO_BYOK): Promise<HandlerResult> {
   if (rateLimited(clientId)) return tooMany;
   let lines: string[];
+  let llm: LlmConfig;
   try {
+    llm = llmConfig(env, byok);
     lines = validateLines((raw as Record<string, unknown> | null)?.lines);
   } catch (err) {
     return badRequest(err);
   }
-  return { status: 200, body: await translateToEnglish(llmConfig(env), lines) };
+  return { status: 200, body: await translateToEnglish(llm, lines) };
 }

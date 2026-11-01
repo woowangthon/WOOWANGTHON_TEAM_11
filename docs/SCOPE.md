@@ -11,6 +11,7 @@
 - 웹 화면 4단계, 요청 핸들러(입력 검증·요청 횟수 제한), 배포 빌드 스크립트
 
 ## 외부 기술 (API·라이브러리·모델)
+- 사용자 키 사용 시(선택): Anthropic Claude (공식 SDK `@anthropic-ai/sdk`, 기본 `claude-opus-5-5`, 거절 시 서버측 fallback), OpenAI Chat Completions
 - Google Gemini API (OpenAI 호환 엔드포인트), 모델 `gemini-flash-lite-latest` → `gemini-flash-latest`
 - React, Vite, esbuild, TypeScript
 - Vercel (배포)
@@ -35,3 +36,10 @@
 - 점검 단계의 "샘플 코드로 체험"은 일부러 문제를 넣은 예시 코드이며 화면에 "샘플 코드" 표시. 점검 자체는 매번 실제 호출
 - 예시 요청 버튼 3개는 입력 편의용 샘플 문장 (결과는 매번 실제 AI 호출)
 - 로그인 없음, 테스트 계정 불필요
+
+## 사용자 API 키(BYOK) 보안
+- 키는 브라우저 메모리에만 둔다. "이 탭에서 기억"을 켠 경우만 sessionStorage(탭 닫으면 삭제). localStorage에는 저장하지 않음
+- 요청 본문이 아니라 헤더(`X-LLM-Key`)로 보내, 본문 로깅에 섞이지 않게 함
+- 서버는 제공자를 허용 목록(Gemini·Anthropic·OpenAI)으로만 받고, 전송 주소는 코드에 고정 — 요청이 주소를 바꿀 수 없음(SSRF·키 탈취 방지)
+- 키·모델 이름은 형식 검사(줄바꿈·공백 등 차단), 서버는 키를 저장·로그하지 않고, 오류는 HTTP 상태 코드만 돌려줌 (테스트로 키 비노출 확인)
+- 배포 응답 헤더: CSP `connect-src 'self'`(페이지가 이 사이트 API 외에는 통신 불가), `frame-ancestors 'none'`, nosniff, no-referrer. API 응답은 `Cache-Control: no-store`

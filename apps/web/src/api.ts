@@ -1,4 +1,5 @@
 import type { Card, Decision, Finding, Generated, Profile, Source, Task } from '@spec/core';
+import { credentialHeaders } from './credentials.ts';
 
 export interface ReviewResult {
   findings: Finding[];
@@ -10,7 +11,7 @@ export interface ReviewResult {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...credentialHeaders() },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
