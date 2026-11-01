@@ -14,6 +14,9 @@ import {
   recommendRules,
   recommendedAnswers,
   toDecisions,
+  translatableTexts,
+  withTexts,
+  CUSTOM_ANSWER,
 } from '../src/index.ts';
 import type { LlmConfig, Profile } from '../src/index.ts';
 
@@ -138,6 +141,7 @@ test('buildSpec includes every decision and only the chosen rules', () => {
     request: '할 일 앱',
     summary: '',
     decisions: toDecisions(FALLBACK_CARDS, answers),
+    notes: '',
     rules,
     tasks: fallbackTasks(DEFAULT_PROFILE),
   });
@@ -148,4 +152,38 @@ test('buildSpec includes every decision and only the chosen rules', () => {
 
 test('toDecisions refuses an unanswered card', () => {
   assert.throws(() => toDecisions(FALLBACK_CARDS, {}), /no answer/);
+});
+
+test('a typed answer becomes the decision text and leaves the profile alone', () => {
+  const answers = { ...recommendedAnswers(FALLBACK_CARDS), auth: CUSTOM_ANSWER };
+  const decisions = toDecisions(FALLBACK_CARDS, answers, { auth: '관리자 한 명만 비밀번호로' });
+  assert.equal(decisions.find((d) => d.question.includes('로그인'))?.answer, '관리자 한 명만 비밀번호로');
+  assert.equal(deriveProfile(FALLBACK_CARDS, answers).auth, DEFAULT_PROFILE.auth);
+  assert.throws(() => toDecisions(FALLBACK_CARDS, answers, { auth: '  ' }), /비어 있습니다/);
+});
+
+test('every rule has a Korean instruction', () => {
+  for (const r of ALL_RULES) assert.ok(r.instructionKo.trim(), r.id);
+});
+
+test('withTexts is the exact inverse of translatableTexts', () => {
+  const input = {
+    request: 'r', summary: '', notes: 'n', rules: [],
+    decisions: [{ question: 'q', answer: 'a' }],
+    tasks: [{ title: 't', done: 'd' }],
+  };
+  assert.deepEqual(withTexts(input, translatableTexts(input)), input);
+  assert.throws(() => withTexts(input, ['x']), /expected/);
+});
+
+test('the Korean spec uses Korean instructions and keeps the same sections', () => {
+  const input = {
+    request: 'r', summary: '', notes: '메모', decisions: [], tasks: [],
+    rules: ALL_RULES.filter((r) => r.id === 'sec-secrets'),
+  };
+  const ko = buildSpec(input, 'ko');
+  assert.match(ko, /## 보안 규칙/);
+  assert.match(ko, /환경변수에서 읽고/);
+  assert.match(ko, /## 주인이 덧붙인 말/);
+  assert.match(buildSpec(input, 'en'), /## Additional notes from the owner/);
 });

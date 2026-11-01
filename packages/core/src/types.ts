@@ -42,8 +42,13 @@ export interface Card {
   options: CardOption[];
 }
 
-/** cardId -> chosen optionId */
+/** cardId -> chosen optionId, or CUSTOM_ANSWER when the user typed their own. */
 export type Answers = Record<string, string>;
+
+/** cardId -> the user's own answer text, used where Answers holds CUSTOM_ANSWER. */
+export type CustomAnswers = Record<string, string>;
+
+export const CUSTOM_ANSWER = 'custom';
 
 /** A card and its chosen option as plain text: what crosses the network after the cards step. */
 export interface Decision {
@@ -59,6 +64,8 @@ export interface Rule {
   title: string;
   /** The line that goes into the coding agent's instruction file. */
   instruction: string;
+  /** The same instruction in Korean, for the owner's review copy of the spec. */
+  instructionKo: string;
   /** Shown to the user: why this matters for their project. */
   why: string;
   /** Returns the reason it applies, or null when it does not. */

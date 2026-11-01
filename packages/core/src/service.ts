@@ -39,9 +39,10 @@ export async function generateTasks(
   decisions: Decision[],
   rules: Rule[],
   profile: Profile,
+  notes = '',
 ): Promise<Generated<Task[]>> {
   try {
-    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules));
+    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes));
     return { data: parseTasks(extractJson(res.text)), source: 'ai', model: res.model, error: null };
   } catch (err) {
     return { data: fallbackTasks(profile), source: 'fallback', model: null, error: (err as Error).message };

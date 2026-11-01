@@ -31,7 +31,8 @@ Return JSON only: {"tasks": [{"title": string, "done": string}]}
 - "title" is an imperative instruction in Korean. "done" is a checkable completion condition in Korean.
 - Respect every decision and rule given. Do not add features that were not requested.`;
 
-export function tasksUser(request: string, decisions: Decision[], rules: Rule[]): string {
+export function tasksUser(request: string, decisions: Decision[], rules: Rule[], notes = ''): string {
   const lines = decisions.map((d) => `- ${d.question} → ${d.answer}`).join('\n');
-  return `App request:\n"""${request}"""\n\nDecisions:\n${lines}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
+  const extra = notes.trim() ? `\n\nOwner's notes:\n"""${notes.trim()}"""` : '';
+  return `App request:\n"""${request}"""\n\nDecisions:\n${lines}${extra}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
 }
