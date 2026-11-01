@@ -1,4 +1,5 @@
 import type { Card, Decision, Finding, Generated, Profile, Source, Task } from '@spec/core';
+import { credentialHeaders } from './credentials.ts';
 
 export interface ReviewResult {
   findings: Finding[];
@@ -10,7 +11,7 @@ export interface ReviewResult {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...credentialHeaders() },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
@@ -23,5 +24,14 @@ export const fetchCards = (request: string) =>
 
 export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
 
-export const fetchTasks =(input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile }) =>
+export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile; notes: string }) =>
   post<Generated<Task[]>>('/api/tasks', input);
+
+export interface TranslateResult {
+  lines: string[];
+  source: Source;
+  model: string | null;
+  error: string | null;
+}
+
+export const fetchTranslate = (lines: string[]) => post<TranslateResult>('/api/translate', { lines });

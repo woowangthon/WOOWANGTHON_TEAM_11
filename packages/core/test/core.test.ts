@@ -14,6 +14,11 @@ import {
   recommendRules,
   recommendedAnswers,
   toDecisions,
+  translatableTexts,
+  withTexts,
+  CUSTOM_ANSWER,
+  recommendSkills,
+  MAX_SKILLS,
 } from '../src/index.ts';
 import type { LlmConfig, Profile } from '../src/index.ts';
 
@@ -138,6 +143,7 @@ test('buildSpec includes every decision and only the chosen rules', () => {
     request: '할 일 앱',
     summary: '',
     decisions: toDecisions(FALLBACK_CARDS, answers),
+    notes: '',
     rules,
     tasks: fallbackTasks(DEFAULT_PROFILE),
   });
@@ -148,4 +154,57 @@ test('buildSpec includes every decision and only the chosen rules', () => {
 
 test('toDecisions refuses an unanswered card', () => {
   assert.throws(() => toDecisions(FALLBACK_CARDS, {}), /no answer/);
+});
+
+test('a typed answer becomes the decision text and counts as the recommended option for rules', () => {
+  const cards = FALLBACK_CARDS.map((c) =>
+    c.id === 'auth' ? { ...c, options: c.options.map((o) => ({ ...o, recommended: o.id === 'email' })) } : c,
+  );
+  const answers = { ...recommendedAnswers(cards), auth: CUSTOM_ANSWER };
+  const decisions = toDecisions(cards, answers, { auth: '관리자 한 명만 비밀번호로' });
+  assert.equal(decisions.find((d) => d.question.includes('로그인'))?.answer, '관리자 한 명만 비밀번호로');
+  assert.equal(deriveProfile(cards, answers).auth, 'email');
+  assert.throws(() => toDecisions(FALLBACK_CARDS, answers, { auth: '  ' }), /비어 있습니다/);
+});
+
+test('every rule has a Korean instruction', () => {
+  for (const r of ALL_RULES) assert.ok(r.instructionKo.trim(), r.id);
+});
+
+test('withTexts is the exact inverse of translatableTexts', () => {
+  const input = {
+    request: 'r', summary: '', notes: 'n', rules: [],
+    decisions: [{ question: 'q', answer: 'a' }],
+    tasks: [{ title: 't', done: 'd' }],
+  };
+  assert.deepEqual(withTexts(input, translatableTexts(input)), input);
+  assert.throws(() => withTexts(input, ['x']), /expected/);
+});
+
+test('the Korean spec uses Korean instructions and keeps the same sections', () => {
+  const input = {
+    request: 'r', summary: '', notes: '메모', decisions: [], tasks: [],
+    rules: ALL_RULES.filter((r) => r.id === 'sec-secrets'),
+  };
+  const ko = buildSpec(input, 'ko');
+  assert.match(ko, /## 보안 규칙/);
+  assert.match(ko, /환경변수에서 읽고/);
+  assert.match(ko, /## 주인이 덧붙인 말/);
+  assert.match(buildSpec(input, 'en'), /## Additional notes from the owner/);
+});
+
+test('skill recommendations stay capped and no source dominates', () => {
+  const profiles = [
+    DEFAULT_PROFILE,
+    { ...DEFAULT_PROFILE, stage: 'production' as const, users: 'multi' as const, auth: 'email' as const, storage: 'server-db' as const, externalApi: 'yes' as const },
+  ];
+  for (const p of profiles) {
+    const recs = recommendSkills(p);
+    assert.ok(recs.length > 0 && recs.length <= MAX_SKILLS);
+    const perRepo = new Map<string, number>();
+    for (const r of recs) perRepo.set(r.skill.repo, (perRepo.get(r.skill.repo) ?? 0) + 1);
+    for (const [repo, n] of perRepo) assert.ok(n <= 2, repo);
+  }
+  const prod = recommendSkills(profiles[1]).map((r) => r.skill.id);
+  assert.ok(prod.includes('tdd'));
 });

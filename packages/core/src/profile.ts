@@ -1,5 +1,5 @@
-import { DEFAULT_PROFILE, PROFILE_SCHEMA } from './types.ts';
-import type { Answers, Card, Decision, Profile, ProfileKey } from './types.ts';
+import { CUSTOM_ANSWER, DEFAULT_PROFILE, PROFILE_SCHEMA } from './types.ts';
+import type { Answers, Card, CustomAnswers, Decision, Profile, ProfileKey } from './types.ts';
 
 export function isProfileKey(key: string): key is ProfileKey {
   return Object.hasOwn(PROFILE_SCHEMA, key);
@@ -19,7 +19,13 @@ export function deriveProfile(cards: Card[], answers: Answers): Profile {
   for (const card of cards) {
     const chosen = answers[card.id];
     if (chosen === undefined) continue;
-    const option = card.options.find((o) => o.id === chosen);
+    // A typed answer cannot be mapped to profile values. Falling back to the defaults would
+    // quietly drop rules (typing "admin logs in with a password" would read as "no login"),
+    // so it counts as the card's recommended option; the user can still toggle rules.
+    const option =
+      chosen === CUSTOM_ANSWER
+        ? (card.options.find((o) => o.recommended) ?? card.options[0])
+        : card.options.find((o) => o.id === chosen);
     if (!option) throw new Error(`answer "${chosen}" is not an option of card "${card.id}"`);
     Object.assign(profile, option.sets);
   }
@@ -29,8 +35,15 @@ export function deriveProfile(cards: Card[], answers: Answers): Profile {
   return profile;
 }
 
-export function toDecisions(cards: Card[], answers: Answers): Decision[] {
+export const MAX_CUSTOM_ANSWER_CHARS = 120;
+
+export function toDecisions(cards: Card[], answers: Answers, custom: CustomAnswers = {}): Decision[] {
   return cards.map((card) => {
+    if (answers[card.id] === CUSTOM_ANSWER) {
+      const text = custom[card.id]?.trim();
+      if (!text) throw new Error(`"${card.question}"에 직접 입력한 답이 비어 있습니다.`);
+      return { question: card.question, answer: text.slice(0, MAX_CUSTOM_ANSWER_CHARS) };
+    }
     const option = card.options.find((o) => o.id === answers[card.id]);
     if (!option) throw new Error(`card "${card.id}" has no answer`);
     return { question: card.question, answer: option.label };

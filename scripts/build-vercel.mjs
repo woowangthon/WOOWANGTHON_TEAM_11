@@ -23,7 +23,9 @@ for (const file of entries) {
     outfile: `${dir}/index.js`,
     bundle: true,
     format: 'esm',
-    platform: 'neutral',
+    platform: 'browser',
+    // Worker/browser builds of dependencies (the Anthropic SDK) avoid node:* modules the edge runtime lacks.
+    conditions: ['worker', 'browser'],
     target: 'es2022',
     // process.env is provided by the edge runtime at request time; it must not be inlined at build.
     define: {},
@@ -31,5 +33,26 @@ for (const file of entries) {
   writeFileSync(`${dir}/.vc-config.json`, JSON.stringify({ runtime: 'edge', entrypoint: 'index.js' }, null, 2));
 }
 
-writeFileSync(`${OUT}/config.json`, JSON.stringify({ version: 3 }, null, 2));
+// Security headers for every response. connect-src 'self' means the page can only talk to
+// this site's own API: a user's key can never be sent anywhere else from the browser.
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    'font-src https://cdn.jsdelivr.net',
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; '),
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+writeFileSync(
+  `${OUT}/config.json`,
+  JSON.stringify({ version: 3, routes: [{ src: '/(.*)', headers: SECURITY_HEADERS, continue: true }] }, null, 2),
+);
 console.log(`built ${entries.length} function(s) + static site into ${OUT}`);
