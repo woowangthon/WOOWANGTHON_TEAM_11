@@ -56,6 +56,15 @@ const RAW_FALLBACK: RawCard[] = [
     ],
   },
   {
+    id: 'scale',
+    question: '얼마나 많은 사람이 쓰게 될까요?',
+    why: '규모에 따라 서버 비용, 요청 제한, 성능 대비가 완전히 달라집니다.',
+    options: [
+      { id: 'small', label: '수십~수백 명', detail: '동아리·지인·소규모 테스트', recommended: true, sets: { scale: 'small' }, difficulty: 'easy', effort: '' },
+      { id: 'large', label: '수천 명 이상', detail: '공개 서비스·트래픽 급증 가능', recommended: false, sets: { scale: 'large' }, difficulty: 'hard', effort: '캐시·요청 제한·부하 대비 필요' },
+    ],
+  },
+  {
     id: 'stage',
     question: '어디까지 만들 계획인가요?',
     why: '시험용과 실제 서비스는 필요한 테스트·점검 수준이 다릅니다.',

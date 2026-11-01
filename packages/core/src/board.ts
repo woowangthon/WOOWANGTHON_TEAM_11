@@ -1,5 +1,5 @@
 import type { SecurityCheckRule } from './securityChecks.ts';
-import type { Difficulty, Task } from './types.ts';
+import type { Difficulty, FocusCheck, Task } from './types.ts';
 
 export const COLUMNS = ['todo', 'doing', 'verify', 'done'] as const;
 export type Column = (typeof COLUMNS)[number];
@@ -57,7 +57,7 @@ export function boardKey(request: string, tasks: Task[]): string {
 const LEVEL: Record<Difficulty, string> = { easy: '하', medium: '중', hard: '상' };
 
 /** A Markdown checklist that pastes into a GitHub issue, Notion or any tracker. */
-export function boardMarkdown(state: BoardState, tasks: Task[], rules: SecurityCheckRule[]): string {
+export function boardMarkdown(state: BoardState, tasks: Task[], rules: SecurityCheckRule[], focus: FocusCheck[] = []): string {
   const box = (on: boolean) => (on ? '[x]' : '[ ]');
   const lines: string[] = ['## 작업', ''];
   tasks.forEach((t, i) => {
@@ -66,8 +66,12 @@ export function boardMarkdown(state: BoardState, tasks: Task[], rules: SecurityC
     for (const w of t.watchouts) lines.push(`  - 주의: ${w}`);
     t.securityChecks.forEach((c, j) => lines.push(`  - ${box(!!state.checked[taskCheckKey(i, j)])} 사람 확인: ${c.what}`));
   });
+  if (focus.length) {
+    lines.push('', '## 이 앱에서 특히 확인할 것 (AI)', '');
+    focus.forEach((c, i) => lines.push(`- ${box(!!state.checked[`focus:${i}`])} ${c.what}`));
+  }
   if (rules.length) {
-    lines.push('', '## 사람이 직접 확인할 것', '');
+    lines.push('', '## 기본 점검 (고정 안내문)', '');
     for (const r of rules) lines.push(`- ${box(!!state.checked[`rule:${r.id}`])} ${r.what}`);
   }
   return lines.join('\n') + '\n';

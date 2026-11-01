@@ -12,6 +12,8 @@ export const PROFILE_SCHEMA = {
   money: ['no', 'yes'],
   externalApi: ['no', 'yes'],
   stage: ['prototype', 'production'],
+  /** Expected users/traffic: 'large' means load matters (thousands of users, traffic spikes). */
+  scale: ['small', 'large'],
 } as const;
 
 export type ProfileKey = keyof typeof PROFILE_SCHEMA;
@@ -28,6 +30,7 @@ export const DEFAULT_PROFILE: Profile = {
   money: 'no',
   externalApi: 'no',
   stage: 'prototype',
+  scale: 'small',
 };
 
 export interface CardOption {
@@ -134,16 +137,32 @@ export interface BudgetItem {
 /** A rough running-cost estimate at small scale; shown as an estimate, never as a quote. */
 export interface Budget {
   freeTier: (typeof FREE_TIERS)[number];
+  /** The usage level the estimate assumes, in the owner's terms (e.g. "동시 접속 수천 명"). */
+  assumedScale: string;
   /** A KRW range, e.g. "0원~1만원". */
   monthly: string;
   summary: string;
   items: BudgetItem[];
 }
 
+/** A security check written for this app (e.g. "can a member change someone else's fine?"). */
+export interface FocusCheck {
+  what: string;
+  steps: string[];
+}
+
+/** A skill from the vetted catalog, with a reason written for this project. */
+export interface SkillPick {
+  id: string;
+  reason: string;
+}
+
 export interface Plan {
   tasks: Task[];
   stack: StackItem[];
   budget: Budget;
+  securityFocus: FocusCheck[];
+  skills: SkillPick[];
 }
 
 /** Where a piece of output came from. Shown in the UI: the contest forbids passing fixed output off as AI output. */

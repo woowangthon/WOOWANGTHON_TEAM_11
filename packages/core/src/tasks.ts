@@ -1,5 +1,6 @@
 import { DIFFICULTIES, FREE_TIERS } from './types.ts';
-import type { Budget, BudgetItem, Difficulty, SecurityCheck, Plan, Profile, StackItem, Task } from './types.ts';
+import type { Budget, BudgetItem, Difficulty, FocusCheck, SecurityCheck, Plan, Profile, SkillPick, StackItem, Task } from './types.ts';
+import { SKILLS } from './skills.ts';
 
 const MAX_TASKS = 10;
 const MAX_STACK = 6;
@@ -41,7 +42,13 @@ export function parsePlan(raw: unknown): Plan {
     const choice = text(item?.choice, 60);
     return area && choice ? [{ area, choice, why: text(item.why, 140), connects: text(item.connects, 160) }] : [];
   });
-  return { tasks, stack, budget: parseBudget(obj.budget) };
+  return {
+    tasks: tasks.map(calibrateDifficulty),
+    stack,
+    budget: parseBudget(obj.budget),
+    securityFocus: parseFocus(obj.securityFocus),
+    skills: parseSkillPicks(obj.skills),
+  };
 }
 
 /** A generic plan derived from the profile alone; used when the AI call fails. */
@@ -61,7 +68,8 @@ export function fallbackPlan(profile: Profile): Plan {
   if (profile.externalApi === 'yes') tasks.push(t('외부 API를 서비스 모듈로 감싸 연결', '키가 코드에 없고 API 실패 시 화면에 안내가 뜸', 'medium', '키 관리와 실패 처리가 필요'));
   if (profile.payment === 'yes') tasks.push(t('결제 서비스 연동과 서버측 결제 확인', '웹훅으로 확인된 결제만 완료 처리됨', 'hard', '웹훅·서버 검증 없이는 결제 우회 가능'));
   tasks.push(t('나머지 기능을 하나씩 추가하고 매번 테스트 실행', '요청한 기능이 모두 동작하고 테스트가 통과함', 'medium', '기능 수에 비례'));
-  return { tasks, stack: fallbackStack(profile), budget: fallbackBudget(profile) };
+  // No app-specific security checks or skill picks without the model: those must not be faked.
+  return { tasks, stack: fallbackStack(profile), budget: fallbackBudget(profile), securityFocus: [], skills: [] };
 }
 
 /** Widely used, free-tier-friendly defaults per profile trait. */
@@ -96,7 +104,13 @@ function parseBudget(raw: unknown): Budget {
     const name = text(item?.name, 40);
     return name ? [{ name, free: text(item.free, 120), paid: text(item.paid, 120) }] : [];
   });
-  return { freeTier, monthly: text(b.monthly, 40) || '추정 불가', summary: text(b.summary, 200), items };
+  return {
+    freeTier,
+    assumedScale: text(b.assumedScale, 60) || '규모 미상',
+    monthly: text(b.monthly, 40) || '추정 불가',
+    summary: text(b.summary, 200),
+    items,
+  };
 }
 
 /** Rule-based estimate from the profile, used when the AI call fails. Small scale, ~100 users. */
@@ -110,15 +124,20 @@ export function fallbackBudget(profile: Profile): Budget {
   if (profile.externalApi === 'yes') add('외부/AI API', '무료 티어는 하루 요청 수 제한', '사용량 비례 (AI는 요청당 수원~수십원)');
   if (profile.upload === 'yes') add('파일 저장소', '1GB 안팎 무료', '용량·전송량 비례');
   if (profile.payment === 'yes') add('결제 (PG)', '가입·테스트 무료', '결제 금액의 약 3% 수수료');
+  if (profile.scale === 'large') add('트래픽 대응', '무료 티어는 요청·대역폭 한도가 작음', '사용량 비례로 월 수만~수십만원');
   const paidOnly = profile.payment === 'yes' || profile.platform === 'mobile';
-  const freeTier: Budget['freeTier'] = paidOnly ? 'partial' : profile.externalApi === 'yes' ? 'partial' : 'full';
+  const freeTier: Budget['freeTier'] =
+    profile.scale === 'large' ? 'none' : paidOnly || profile.externalApi === 'yes' ? 'partial' : 'full';
   return {
     freeTier,
-    monthly: freeTier === 'full' ? '0원' : '0원~수만원',
+    assumedScale: profile.scale === 'large' ? '수천 명 이상 (카드 선택 기준)' : '수십~수백 명 (카드 선택 기준)',
+    monthly: freeTier === 'full' ? '0원' : freeTier === 'none' ? '수만~수십만원' : '0원~수만원',
     summary:
       freeTier === 'full'
         ? '소규모라면 무료 티어만으로 운영할 수 있습니다. 사용자가 늘거나 상업적으로 쓰면 유료로 바뀝니다.'
-        : '개발·시험은 무료로 가능하지만, 외부 API 사용량이나 결제·앱 스토어 비용이 생깁니다.',
+        : freeTier === 'none'
+          ? '트래픽이 많으면 무료 한도를 바로 넘습니다. 호스팅·DB·API 모두 사용량에 비례해 비용이 생깁니다.'
+          : '개발·시험은 무료로 가능하지만, 외부 API 사용량이나 결제·앱 스토어 비용이 생깁니다.',
     items,
   };
 }
@@ -143,4 +162,37 @@ export function stackWarnings(stack: StackItem[]): string[] {
     );
   }
   return warnings;
+}
+
+// Topics that are hard for a non-developer with an AI agent whatever the model says: they fail
+// under load, under concurrency or with money, and the failure is not visible in a quick test.
+const HARD_TOPICS = /트래픽|성능|최적화|확장|부하|동시|실시간|결제|환불|웹훅|캐시|마이그레이션|rate\s?limit|요청 제한|scal|concurren|real-?time|payment|webhook|perf/i;
+
+/** Raises a task on a known-hard topic to "hard", saying so, instead of trusting a lower estimate. */
+export function calibrateDifficulty(task: Task): Task {
+  if (task.difficulty === 'hard' || !HARD_TOPICS.test(`${task.title} ${task.done}`)) return task;
+  return { ...task, difficulty: 'hard', reason: `(규칙 보정: 부하·동시성·돈이 걸린 작업은 '상') ${task.reason}`.trim() };
+}
+
+function parseFocus(raw: unknown): FocusCheck[] {
+  return (Array.isArray(raw) ? raw : []).slice(0, 5).flatMap((c): FocusCheck[] => {
+    const item = c as Record<string, unknown>;
+    const what = text(item?.what, 140);
+    const steps = (Array.isArray(item?.steps) ? item.steps : []).map((st) => text(st, 240)).filter(Boolean).slice(0, 5);
+    return what && steps.length ? [{ what, steps }] : [];
+  });
+}
+
+/** Only ids from the vetted catalog survive: the model may tailor the reason, not invent a skill. */
+function parseSkillPicks(raw: unknown): SkillPick[] {
+  // Models often answer with the display name instead of the id; both resolve to the same entry.
+  const byKey = new Map(SKILLS.flatMap((s) => [[s.id.toLowerCase(), s.id], [s.name.toLowerCase(), s.id]] as const));
+  const seen = new Set<string>();
+  return (Array.isArray(raw) ? raw : []).flatMap((p): SkillPick[] => {
+    const item = p as Record<string, unknown>;
+    const id = byKey.get(text(item?.id ?? item?.name, 60).toLowerCase());
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, reason: text(item.reason, 160) }];
+  }).slice(0, 4);
 }

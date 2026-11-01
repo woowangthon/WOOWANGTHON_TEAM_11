@@ -94,7 +94,13 @@ export const SECURITY_RULES: Rule[] = [
       'Add rate limiting to login and to any endpoint that calls a paid or quota-limited external API.',
     why: '제한이 없으면 누군가 API를 반복 호출해서 요금 폭탄이나 무료 한도 소진이 일어납니다.',
     appliesTo: (p) =>
-      p.externalApi === 'yes' ? '외부 API 호출 비용이 사용자 요청에 비례함' : p.auth !== 'none' ? '로그인 무차별 대입을 막아야 함' : null,
+      p.scale === 'large'
+        ? '트래픽이 많아 한 사용자의 과도한 요청이 전체를 느리게 만들 수 있음'
+        : p.externalApi === 'yes'
+          ? '외부 API 호출 비용이 사용자 요청에 비례함'
+          : p.auth !== 'none'
+            ? '로그인 무차별 대입을 막아야 함'
+            : null,
   },
   {
     id: 'sec-deps',

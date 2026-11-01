@@ -53,7 +53,7 @@ export async function generateTasks(
   domainRules: string[] = [],
 ): Promise<Generated<Plan>> {
   try {
-    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules));
+    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules, profile));
     return { data: parsePlan(extractJson(res.text)), source: 'ai', model: res.model, error: null };
   } catch (err) {
     return { data: fallbackPlan(profile), source: 'fallback', model: null, error: (err as Error).message };
