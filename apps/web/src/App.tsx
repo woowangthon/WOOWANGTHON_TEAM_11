@@ -35,6 +35,11 @@ export function App() {
     saveScheme(scheme);
   }, [scheme]);
 
+  // A new step starts at its top; otherwise the long cards list leaves the next step scrolled to its end.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [step]);
+
   const cards = cardsResult?.data.cards ?? [];
   const profile = useMemo(() => deriveProfile(cards, answers), [cards, answers]);
   const recommendations = useMemo(() => recommendRules(profile), [profile]);
