@@ -1,10 +1,9 @@
-import type { Answers, Card, Rule, Task } from './types.ts';
+import type { Decision, Rule, Task } from './types.ts';
 
 export interface SpecInput {
   request: string;
   summary: string;
-  cards: Card[];
-  answers: Answers;
+  decisions: Decision[];
   rules: Rule[];
   tasks: Task[];
 }
@@ -15,12 +14,7 @@ export interface SpecInput {
  * the user's own words (request, decisions) stay as they wrote them.
  */
 export function buildSpec(input: SpecInput): string {
-  const { request, summary, cards, answers, rules, tasks } = input;
-  const decisions = cards.map((c) => {
-    const option = c.options.find((o) => o.id === answers[c.id]);
-    if (!option) throw new Error(`card "${c.id}" has no answer`);
-    return `- ${c.question} → **${option.label}**${option.detail ? ` (${option.detail})` : ''}`;
-  });
+  const { request, summary, decisions, rules, tasks } = input;
   const section = (category: Rule['category']) =>
     rules.filter((r) => r.category === category).map((r) => `- ${r.instruction}`);
   const engineering = section('engineering');
@@ -35,7 +29,7 @@ export function buildSpec(input: SpecInput): string {
     '',
     '## Decisions already made',
     'These were decided by the owner. Do not change them; ask if one blocks you.',
-    ...decisions,
+    ...decisions.map((d) => `- ${d.question} → **${d.answer}**`),
   ];
   if (engineering.length) lines.push('', '## Engineering rules', ...engineering);
   if (security.length) lines.push('', '## Security rules', ...security);

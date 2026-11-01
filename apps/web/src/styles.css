@@ -1,0 +1,83 @@
+@import './tokens.css';
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; }
+button { font-family: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.Shell { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 4rem; display: flex; flex-direction: column; gap: 1rem; }
+.Header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+.Brand { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.Brand h1 { margin: 0; font-size: 1.15rem; font-weight: 800; }
+.Brand p { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
+
+.Steps { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.StepPill {
+  padding: 0.26rem 0.62rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+  border: 1px solid var(--border-color); color: var(--text-muted); background: var(--bg-color);
+}
+.StepPill.done { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-main); }
+.StepPill.active { background: var(--accent-color); border-color: var(--accent-color); color: var(--accent-contrast); }
+
+.SectionTitle { margin: 0; font-size: 1.05rem; font-weight: 800; }
+.Muted { color: var(--text-muted); font-size: 0.8rem; margin: 0; }
+.Row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.Spacer { flex: 1; }
+
+.Textarea { width: 100%; min-height: 7rem; padding: 0.8rem; font-size: 0.9rem; line-height: 1.5; border-radius: 12px; }
+.Examples { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.Chip {
+  padding: 0.26rem 0.62rem; border-radius: 999px; font-size: 0.74rem; font-weight: 600;
+  border: 1px dashed color-mix(in srgb, var(--accent-color) 45%, transparent);
+  background: transparent; color: var(--text-main);
+}
+.Chip:hover { background: color-mix(in srgb, var(--accent-color) 8%, transparent); }
+
+.Badge {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+  font-size: 0.66rem; font-weight: 900; white-space: nowrap;
+  background: color-mix(in srgb, var(--accent-color) 20%, transparent); color: var(--text-main);
+}
+.Badge.fallback { background: transparent; border: 1px dashed var(--text-muted); color: var(--text-muted); }
+
+.Card { display: flex; flex-direction: column; gap: 0.6rem; }
+.CardQ { margin: 0; font-size: 0.95rem; font-weight: 800; }
+.CardWhy { margin: 0; font-size: 0.76rem; color: var(--text-muted); }
+.Options { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
+.Option {
+  text-align: left; padding: 0.6rem 0.75rem; border-radius: 10px; min-width: 0;
+  border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main);
+  display: flex; flex-direction: column; gap: 0.2rem; transition: all 0.15s;
+}
+.Option:hover { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.Option.selected { box-shadow: inset 0 0 0 2px var(--accent-color); background: color-mix(in srgb, var(--accent-color) 16%, transparent); }
+.OptionLabel { font-size: 0.86rem; font-weight: 700; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.OptionDetail { font-size: 0.72rem; color: var(--text-muted); }
+.Rec { font-size: 0.62rem; font-weight: 900; padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--accent-color); color: var(--accent-contrast); white-space: nowrap; }
+
+.RuleGroup { display: flex; flex-direction: column; gap: 0.5rem; }
+.RuleRow {
+  display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.7rem 0.8rem; border-radius: 10px; text-align: left;
+  border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main); width: 100%;
+}
+.RuleRow.on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.RuleBody { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.RuleTitle { font-size: 0.86rem; font-weight: 700; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.RuleWhy { font-size: 0.74rem; color: var(--text-muted); }
+.Check {
+  width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; border-radius: 5px; display: grid; place-items: center;
+  border: 1.5px solid var(--border-color); font-size: 0.7rem; font-weight: 900; color: transparent;
+}
+.Check.on { background: var(--accent-color); border-color: var(--accent-color); color: var(--accent-contrast); }
+
+.Spec {
+  margin: 0; padding: 1rem; border-radius: 12px; overflow-x: auto; max-height: 28rem;
+  background: var(--bg-color); border: 1px solid var(--border-color);
+  font-size: 0.76rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.Stat { display: flex; flex-direction: column; gap: 0.1rem; }
+.StatNum { font-size: 1.15rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+.StatLabel { font-size: 0.68rem; color: var(--text-muted); font-weight: 700; }
+.Error { padding: 0.6rem 0.8rem; border-radius: 10px; font-size: 0.8rem; border: 1px solid var(--accent-color); background: color-mix(in srgb, var(--accent-color) 8%, transparent); }
+.Note { font-size: 0.72rem; color: var(--text-muted); }

@@ -13,6 +13,7 @@ import {
   parseCards,
   recommendRules,
   recommendedAnswers,
+  toDecisions,
 } from '../src/index.ts';
 import type { LlmConfig, Profile } from '../src/index.ts';
 
@@ -136,8 +137,7 @@ test('buildSpec includes every decision and only the chosen rules', () => {
   const spec = buildSpec({
     request: '할 일 앱',
     summary: '',
-    cards: FALLBACK_CARDS,
-    answers,
+    decisions: toDecisions(FALLBACK_CARDS, answers),
     rules,
     tasks: fallbackTasks(DEFAULT_PROFILE),
   });
@@ -146,9 +146,6 @@ test('buildSpec includes every decision and only the chosen rules', () => {
   assert.ok(!spec.includes('## Engineering rules'));
 });
 
-test('buildSpec refuses an unanswered card', () => {
-  assert.throws(
-    () => buildSpec({ request: 'x', summary: '', cards: FALLBACK_CARDS, answers: {}, rules: [], tasks: [] }),
-    /no answer/,
-  );
+test('toDecisions refuses an unanswered card', () => {
+  assert.throws(() => toDecisions(FALLBACK_CARDS, {}), /no answer/);
 });

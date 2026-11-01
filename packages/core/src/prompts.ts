@@ -1,6 +1,6 @@
 import { MAX_CARDS } from './cards.ts';
 import { PROFILE_SCHEMA } from './types.ts';
-import type { Card, Answers, Rule } from './types.ts';
+import type { Decision, Rule } from './types.ts';
 
 const profileVocabulary = Object.entries(PROFILE_SCHEMA)
   .map(([key, values]) => `- ${key}: ${values.join(' | ')}`)
@@ -31,9 +31,7 @@ Return JSON only: {"tasks": [{"title": string, "done": string}]}
 - "title" is an imperative instruction in Korean. "done" is a checkable completion condition in Korean.
 - Respect every decision and rule given. Do not add features that were not requested.`;
 
-export function tasksUser(request: string, cards: Card[], answers: Answers, rules: Rule[]): string {
-  const decisions = cards
-    .map((c) => `- ${c.question} → ${c.options.find((o) => o.id === answers[c.id])?.label ?? '(미정)'}`)
-    .join('\n');
-  return `App request:\n"""${request}"""\n\nDecisions:\n${decisions}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
+export function tasksUser(request: string, decisions: Decision[], rules: Rule[]): string {
+  const lines = decisions.map((d) => `- ${d.question} → ${d.answer}`).join('\n');
+  return `App request:\n"""${request}"""\n\nDecisions:\n${lines}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
 }

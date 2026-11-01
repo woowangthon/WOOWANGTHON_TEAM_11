@@ -45,6 +45,12 @@ export interface Card {
 /** cardId -> chosen optionId */
 export type Answers = Record<string, string>;
 
+/** A card and its chosen option as plain text: what crosses the network after the cards step. */
+export interface Decision {
+  question: string;
+  answer: string;
+}
+
 export type RuleCategory = 'engineering' | 'security';
 
 export interface Rule {

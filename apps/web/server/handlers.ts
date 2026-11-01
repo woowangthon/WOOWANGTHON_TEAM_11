@@ -1,0 +1,76 @@
+// Framework-free request handlers. The Vercel functions in `api/` and the Vite dev
+// middleware both call these, so local and deployed behaviour cannot drift apart.
+import {
+  GEMINI_OPENAI_BASE,
+  findRule,
+  generateCards,
+  generateTasks,
+  parseDecisions,
+  parseProfile,
+  validateRequest,
+} from '@spec/core';
+import type { LlmConfig } from '@spec/core';
+
+export interface HandlerResult {
+  status: number;
+  body: unknown;
+}
+
+export type Env = Record<string, string | undefined>;
+
+export function llmConfig(env: Env): LlmConfig {
+  return {
+    baseUrl: env.LLM_BASE_URL || GEMINI_OPENAI_BASE,
+    apiKey: env.LLM_API_KEY || env.GEMINI_API_KEY || '',
+    // Lite first: this service's whole claim is that the cheap model does the prep work.
+    models: (env.LLM_MODELS || 'gemini-flash-lite-latest,gemini-flash-latest').split(',').map((m) => m.trim()),
+  };
+}
+
+// Best-effort limit per server instance. The free quota is shared by every visitor, so one
+// client looping on the endpoint would otherwise switch AI off for everyone.
+const WINDOW_MS = 60_000;
+const MAX_PER_WINDOW = 10;
+const hits = new Map<string, number[]>();
+
+export function rateLimited(clientId: string, now = Date.now()): boolean {
+  const recent = (hits.get(clientId) ?? []).filter((t) => now - t < WINDOW_MS);
+  recent.push(now);
+  hits.set(clientId, recent);
+  return recent.length > MAX_PER_WINDOW;
+}
+
+const badRequest = (err: unknown): HandlerResult => ({ status: 400, body: { error: (err as Error).message } });
+const tooMany: HandlerResult = { status: 429, body: { error: '요청이 너무 많습니다. 1분 뒤에 다시 시도해 주세요.' } };
+
+export async function handleCards(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+  if (rateLimited(clientId)) return tooMany;
+  let request: string;
+  try {
+    request = validateRequest((raw as Record<string, unknown>)?.request);
+  } catch (err) {
+    return badRequest(err);
+  }
+  return { status: 200, body: await generateCards(llmConfig(env), request) };
+}
+
+export async function handleTasks(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+  if (rateLimited(clientId)) return tooMany;
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  let input;
+  try {
+    if (!Array.isArray(obj.ruleIds)) throw new Error('ruleIds: expected an array');
+    input = {
+      request: validateRequest(obj.request),
+      decisions: parseDecisions(obj.decisions),
+      rules: obj.ruleIds.map((id) => findRule(String(id))),
+      profile: parseProfile(obj.profile),
+    };
+  } catch (err) {
+    return badRequest(err);
+  }
+  return {
+    status: 200,
+    body: await generateTasks(llmConfig(env), input.request, input.decisions, input.rules, input.profile),
+  };
+}
