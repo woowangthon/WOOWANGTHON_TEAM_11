@@ -1,0 +1,17 @@
+{
+  "spec": "# Project instructions\n\n## Goal\n동아리 회비 관리 앱. 회원별 납부 여부를 보고 미납자에게 알림을 보내고 싶어\n\n동아리 회비 납부 확인 및 미납 알림을 위한 앱 제작 전 명확히 해야 할 주요 결정사항들입니다.\n\n## Decisions already made\nThese were decided by the owner. Do not change them; ask if one blocks you.\n- 앱을 어떤 방식으로 주로 사용하시겠나요? → **스마트폰에서 쓰는 모바일 앱**\n- 로그인 방식은 어떻게 할까요? → **간단한 이메일과 비밀번호 가입**\n- 회비 납부 내역 데이터는 어디에 저장할까요? → **인터넷 서버에 안전하게 저장**\n- 사용자는 혼자만 쓰나요, 여러 명이 같이 보나요? → **총무(관리자) 1명과 회원 여러 명**\n- 영수증이나 통장 캡처 화면을 앱에 올릴 기능이 필요한가요? → **필요 없음**\n- 앱 안에서 직접 회비를 결제하는 기능이 필요한가요? → **필요 없음 (계좌이체 안내만)**\n- 미납자에게 알림을 보낼 때 어떤 방식을 쓸까요? → **앱 안에서 푸시 알림 보내기**\n\n## Engineering rules\n- Before writing features, create the folder layout below and keep to it: pure logic in `src/core/` (no UI, no network), UI in `src/ui/`, external calls in `src/services/`. Do not put business logic inside UI components.\n- Keep every source file under 300 lines. When a file approaches the limit, split it by responsibility before adding more.\n- Never copy logic. The second time the same logic is needed, extract it into a shared function and use it from both places.\n- Never swallow errors. Every failure must either be shown to the user, logged, or thrown. No empty catch blocks.\n- Record every non-obvious design decision in `docs/decisions.md` as one entry: decision, reason, rejected alternative.\n- Store each piece of state in exactly one place and derive everything else from it. Never keep a copy that must be updated in sync.\n\n## Security rules\n- Never write API keys, passwords or tokens in source code. Read them from environment variables, keep `.env` in `.gitignore`, and commit a `.env.example` with empty values.\n- Validate every user input on the server side (type, length, format) before using it. Never trust validation done only in the browser.\n- Never store passwords in plain text. Hash them with bcrypt or argon2, or delegate authentication to an established provider.\n- Check on the server, for every request, that the logged-in user may access the requested data. Never rely on hiding buttons in the UI.\n- Use parameterized queries only. If using a hosted database (e.g. Supabase, Firebase), enable row-level security or security rules before launch; never ship with open read/write.\n- Add rate limiting to login and to any endpoint that calls a paid or quota-limited external API.\n\n## Build plan\nWork through these in order. Finish and verify one before starting the next.\n1. 프로젝트 폴더 구조 설정 및 기본 환경 구성\n   - Done when: 클라이언트와 서버의 기본 폴더 구조가 생성되고 환경 변수 설정 파일이 준비됨\n2. 데이터베이스 스키마 및 보안 규칙 설정\n   - Done when: 사용자, 회비 납부 내역 테이블 생성 및 서버 권한/접근 규칙이 설정됨\n3. 이메일/비밀번호 회원가입 및 로그인 구현\n   - Done when: 비밀번호 해시 저장 및 JWT 기반 로그인/회원가입 기능이 서버와 연동됨\n4. 관리자 및 회원 권한 분기 및 홈 화면 구현\n   - Done when: 총무(관리자)와 일반 회원 로그인 시 각각 다른 대시보드 화면이 표시됨\n5. 회비 납부 내역 조회 및 관리 기능 구현\n   - Done when: 관리자는 회원의 납부 여부를 등록 및 수정할 수 있고, 회원은 본인 납부 내역을 조회할 수 있음\n6. 미납자 필터링 및 인앱 푸시 알림 기능 구현\n   - Done when: 관리자가 미납자를 확인하고 선택하여 푸시 알림을 발송할 수 있음\n\n## Working style\n- If a requirement is ambiguous and not covered above, ask one question instead of guessing.\n- Do not add features that are not in the goal or the build plan.\n",
+  "ruleIds": [
+    "eng-structure",
+    "eng-file-size",
+    "eng-no-duplication",
+    "eng-no-silent-failure",
+    "eng-decisions-log",
+    "eng-single-source",
+    "sec-secrets",
+    "sec-input-validation",
+    "sec-password",
+    "sec-authz",
+    "sec-db-access",
+    "sec-rate-limit"
+  ]
+}

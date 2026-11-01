@@ -1,4 +1,5 @@
-import { Gauge, Layers } from 'lucide-react';
+import { AlertTriangle, Gauge, Layers } from 'lucide-react';
+import { stackWarnings } from '@spec/core';
 import type { Difficulty, Generated, Plan } from '@spec/core';
 import { SourceBadge } from './SourceBadge.tsx';
 
@@ -60,12 +61,16 @@ export function PlanView({ result }: { result: Generated<Plan> }) {
             <span className="Spacer" />
             <SourceBadge result={result} />
           </div>
+          {stackWarnings(stack).map((w) => (
+            <div key={w} className="Error" role="note"><AlertTriangle size={13} /> {w}</div>
+          ))}
           <div className="StackGrid">
             {stack.map((s) => (
               <div key={`${s.area}:${s.choice}`} className="Value">
                 <span className="Note">{s.area}</span>
                 <span className="ValueHead">{s.choice}</span>
-                {s.why && <span className="ValueBody">{s.why}</span>}
+                {s.why && <span className="ValueBody"><b>역할</b> · {s.why}</span>}
+                {s.connects && <span className="ValueBody"><b>연결</b> · {s.connects}</span>}
               </div>
             ))}
           </div>

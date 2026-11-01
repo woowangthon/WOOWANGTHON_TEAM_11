@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowRight, PenLine } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
 import { CUSTOM_ANSWER, MAX_CUSTOM_ANSWER_CHARS, MAX_NOTES_CHARS } from '@spec/core';
-import type { Answers, Card, CustomAnswers, Generated } from '@spec/core';
+import type { Answers, Card, CardKind, CustomAnswers, Generated } from '@spec/core';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
 
 interface Props {
@@ -15,8 +15,14 @@ interface Props {
   onNext: () => void;
 }
 
+const GROUPS: { kind: CardKind; title: string; blurb: string; icon: typeof Scale }[] = [
+  { kind: 'domain', title: '비즈니스 규칙', blurb: '돈·권한·기록처럼 앱마다 다른 규칙입니다. 코딩 AI가 임의로 정하면 가장 크게 어긋나는 부분이에요.', icon: Scale },
+  { kind: 'tech', title: '기술 선택', blurb: '어디서 돌아가고 어디에 저장할지 같은 기반 결정입니다.', icon: Cpu },
+];
+
 export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, onNotes, onBack, onNext }: Props) {
   const { summary, cards } = result.data;
+  const policyOf = (card: Card) => card.options.find((o) => o.id === answers[card.id])?.policy ?? '';
   return (
     <>
       <section className="Panel">
@@ -29,7 +35,16 @@ export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, 
         <p className="Note">추천안이 미리 선택돼 있습니다. 다르게 하고 싶은 카드만 바꾸거나, 보기에 없으면 직접 입력하세요.</p>
       </section>
 
-      {cards.map((card) => {
+      {GROUPS.map(({ kind, title, blurb, icon: Icon }) => {
+        const group = cards.filter((c) => c.kind === kind);
+        if (group.length === 0) return null;
+        return (
+          <div key={kind} className="CardGroup">
+            <div className="GroupHead">
+              <h2 className="SectionTitle"><Icon size={17} /> {title} <span className="ColCount">{group.length}</span></h2>
+              <p className="CardWhy">{blurb}</p>
+            </div>
+            {group.map((card) => {
         const typing = answers[card.id] === CUSTOM_ANSWER;
         return (
           <section key={card.id} className="Panel">
@@ -75,7 +90,11 @@ export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, 
               />
             )}
             {typing && <p className="Note">규칙 추천은 이 카드의 추천안을 기준으로 계산됩니다. 다음 단계에서 규칙을 직접 켜고 끌 수 있어요.</p>}
+            {card.kind === 'domain' && !typing && policyOf(card) && <p className="Policy">사양서에 들어갈 규칙: {policyOf(card)}</p>}
           </section>
+        );
+            })}
+          </div>
         );
       })}
 

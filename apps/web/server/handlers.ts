@@ -98,14 +98,25 @@ export async function handleTasks(raw: unknown, env: Env, clientId: string, byok
       rules: obj.ruleIds.map((id) => findRule(String(id))),
       profile: parseProfile(obj.profile),
       notes: validateNotes(obj.notes),
+      domainRules: parseDomainRules(obj.domainRules),
     };
   } catch (err) {
     return badRequest(err);
   }
   return {
     status: 200,
-    body: await generateTasks(llm, input.request, input.decisions, input.rules, input.profile, input.notes),
+    body: await generateTasks(llm, input.request, input.decisions, input.rules, input.profile, input.notes, input.domainRules),
   };
+}
+
+/** Domain rules arrive as plain sentences from the client; cap count and length like decisions. */
+function parseDomainRules(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > 9) throw new Error('domainRules: expected up to 9 items');
+  return raw.map((r, i) => {
+    if (typeof r !== 'string') throw new Error(`domainRules[${i}]: expected a string`);
+    return r.trim().slice(0, 240);
+  });
 }
 
 export async function handleTranslate(raw: unknown, env: Env, clientId: string, byok: Byok = NO_BYOK): Promise<HandlerResult> {

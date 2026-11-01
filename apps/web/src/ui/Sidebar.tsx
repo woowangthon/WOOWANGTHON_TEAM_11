@@ -9,6 +9,7 @@ const PROFILE_LABEL: { [K in keyof Profile]?: Record<string, string> } = {
   storage: { none: '저장 안 함', local: '기기 저장', 'server-db': '서버 DB' },
   upload: { yes: '파일 업로드' },
   payment: { yes: '결제' },
+  money: { yes: '돈 계산' },
   externalApi: { yes: '외부 API' },
   stage: { prototype: '시제품', production: '실서비스' },
 };
