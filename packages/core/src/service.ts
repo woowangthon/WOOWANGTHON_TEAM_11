@@ -3,6 +3,7 @@ import { chatJson, extractJson } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import { CARDS_SYSTEM, TASKS_SYSTEM, cardsUser, tasksUser } from './prompts.ts';
 import { fallbackTasks, parseTasks } from './tasks.ts';
+import { MAX_CUSTOM_ANSWER_CHARS } from './profile.ts';
 import type { Card, Decision, Profile, Rule, Source, Task } from './types.ts';
 
 export const MAX_REQUEST_CHARS = 2000;
@@ -13,6 +14,15 @@ export interface Generated<T> {
   model: string | null;
   /** Why the fallback was used. Shown to the user, never hidden. */
   error: string | null;
+}
+
+export const MAX_NOTES_CHARS = 1000;
+
+export function validateNotes(notes: unknown): string {
+  if (notes === undefined || notes === null) return '';
+  if (typeof notes !== 'string') throw new Error('notes: expected a string');
+  if (notes.length > MAX_NOTES_CHARS) throw new Error(`추가 메모는 ${MAX_NOTES_CHARS}자 이내로 입력해 주세요.`);
+  return notes.trim();
 }
 
 export function validateRequest(request: unknown): string {
@@ -55,6 +65,6 @@ export function parseDecisions(raw: unknown): Decision[] {
   return raw.map((d, i) => {
     const item = d as Record<string, unknown>;
     if (typeof item?.question !== 'string' || typeof item?.answer !== 'string') throw new Error(`decisions[${i}]: expected strings`);
-    return { question: item.question.slice(0, 80), answer: item.answer.slice(0, 40) };
+    return { question: item.question.slice(0, 80), answer: item.answer.slice(0, MAX_CUSTOM_ANSWER_CHARS) };
   });
 }

@@ -8,7 +8,10 @@ import {
   parseDecisions,
   parseProfile,
   reviewCode,
+  translateToEnglish,
   validateCode,
+  validateLines,
+  validateNotes,
   validateRequest,
 } from '@spec/core';
 import type { LlmConfig } from '@spec/core';
@@ -80,12 +83,24 @@ export async function handleTasks(raw: unknown, env: Env, clientId: string): Pro
       decisions: parseDecisions(obj.decisions),
       rules: obj.ruleIds.map((id) => findRule(String(id))),
       profile: parseProfile(obj.profile),
+      notes: validateNotes(obj.notes),
     };
   } catch (err) {
     return badRequest(err);
   }
   return {
     status: 200,
-    body: await generateTasks(llmConfig(env), input.request, input.decisions, input.rules, input.profile),
+    body: await generateTasks(llmConfig(env), input.request, input.decisions, input.rules, input.profile, input.notes),
   };
+}
+
+export async function handleTranslate(raw: unknown, env: Env, clientId: string): Promise<HandlerResult> {
+  if (rateLimited(clientId)) return tooMany;
+  let lines: string[];
+  try {
+    lines = validateLines((raw as Record<string, unknown> | null)?.lines);
+  } catch (err) {
+    return badRequest(err);
+  }
+  return { status: 200, body: await translateToEnglish(llmConfig(env), lines) };
 }

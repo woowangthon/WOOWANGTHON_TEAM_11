@@ -17,6 +17,7 @@ import {
   translatableTexts,
   withTexts,
   CUSTOM_ANSWER,
+  recommendSkills,
 } from '../src/index.ts';
 import type { LlmConfig, Profile } from '../src/index.ts';
 
@@ -186,4 +187,12 @@ test('the Korean spec uses Korean instructions and keeps the same sections', () 
   assert.match(ko, /환경변수에서 읽고/);
   assert.match(ko, /## 주인이 덧붙인 말/);
   assert.match(buildSpec(input, 'en'), /## Additional notes from the owner/);
+});
+
+test('skill recommendations: ask-first always, more for a production multi-user web app', () => {
+  const base = recommendSkills(DEFAULT_PROFILE).map((s) => s.skill.id);
+  assert.ok(base.includes('ask-first'));
+  const prod = recommendSkills({ ...DEFAULT_PROFILE, stage: 'production', users: 'multi' }).map((s) => s.skill.id);
+  assert.ok(prod.length > base.length);
+  assert.ok(prod.includes('tdd') && prod.includes('engineering-guardrails'));
 });
