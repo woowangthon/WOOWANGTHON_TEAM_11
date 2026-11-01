@@ -43,6 +43,7 @@ export function Sidebar({ profile, rules, decided }: Props) {
 
   return (
     <aside className="Side">
+      <span className="SideHead">실시간 요약</span>
       <section className="Panel">
         <h3 className="SideTitle"><Sparkles size={14} /> 프로젝트 요약</h3>
         <div className="Tags">{tags.map((t) => <span key={t} className="Tag">{t}</span>)}</div>
@@ -77,6 +78,7 @@ export function Sidebar({ profile, rules, decided }: Props) {
                 <a href={`https://github.com/${skill.repo}`} target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>
                   {skill.name} <ExternalLink size={10} />
                 </a>
+                <span className="Note"> · {skill.repo.split('/')[0]}</span>
                 <br />
                 <span className="Note">{reason}</span>
               </span>

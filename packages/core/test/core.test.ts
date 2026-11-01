@@ -18,6 +18,7 @@ import {
   withTexts,
   CUSTOM_ANSWER,
   recommendSkills,
+  MAX_SKILLS,
 } from '../src/index.ts';
 import type { LlmConfig, Profile } from '../src/index.ts';
 
@@ -192,10 +193,18 @@ test('the Korean spec uses Korean instructions and keeps the same sections', () 
   assert.match(buildSpec(input, 'en'), /## Additional notes from the owner/);
 });
 
-test('skill recommendations: ask-first always, more for a production multi-user web app', () => {
-  const base = recommendSkills(DEFAULT_PROFILE).map((s) => s.skill.id);
-  assert.ok(base.includes('ask-first'));
-  const prod = recommendSkills({ ...DEFAULT_PROFILE, stage: 'production', users: 'multi' }).map((s) => s.skill.id);
-  assert.ok(prod.length > base.length);
-  assert.ok(prod.includes('tdd') && prod.includes('engineering-guardrails'));
+test('skill recommendations stay capped and no source dominates', () => {
+  const profiles = [
+    DEFAULT_PROFILE,
+    { ...DEFAULT_PROFILE, stage: 'production' as const, users: 'multi' as const, auth: 'email' as const, storage: 'server-db' as const, externalApi: 'yes' as const },
+  ];
+  for (const p of profiles) {
+    const recs = recommendSkills(p);
+    assert.ok(recs.length > 0 && recs.length <= MAX_SKILLS);
+    const perRepo = new Map<string, number>();
+    for (const r of recs) perRepo.set(r.skill.repo, (perRepo.get(r.skill.repo) ?? 0) + 1);
+    for (const [repo, n] of perRepo) assert.ok(n <= 2, repo);
+  }
+  const prod = recommendSkills(profiles[1]).map((r) => r.skill.id);
+  assert.ok(prod.includes('tdd'));
 });
