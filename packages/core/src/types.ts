@@ -38,6 +38,10 @@ export interface CardOption {
   sets: Partial<Profile>;
   /** For a domain card: the rule this choice fixes, as one sentence for the spec. Empty for tech cards. */
   policy: string;
+  /** How much harder this choice makes the build, so cost is visible while choosing. */
+  difficulty: Difficulty;
+  /** One short line on what makes it that hard; empty when nothing to say. */
+  effort: string;
 }
 
 /** 'domain' cards settle business rules (who may change a fine); 'tech' cards settle infrastructure. */

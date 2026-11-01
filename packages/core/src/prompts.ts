@@ -11,7 +11,8 @@ Find the decisions where the request can be read in more than one way and where 
 The most valuable decisions are business rules, not technology. Find those first.
 Return JSON only, in Korean, with this shape:
 {"summary": string, "cards": [{"kind": "domain" | "tech", "question": string, "why": string,
-  "options": [{"label": string, "detail": string, "recommended": boolean, "sets": object, "policy": string}]}]}
+  "options": [{"label": string, "detail": string, "recommended": boolean, "sets": object, "policy": string,
+               "difficulty": "easy" | "medium" | "hard", "effort": string}]}]}
 
 Domain cards ("kind": "domain"), 3 to 5 of them, come first:
 - Business rules this specific app must settle that the request leaves open. Look for: how states are distinguished (e.g. late vs absent), how amounts are calculated, who may create, change or delete what, whether changes keep a history, whether one user can belong to several groups, who can see what, and what happens on cancellation, refund, correction or deletion.
@@ -22,6 +23,7 @@ Tech cards ("kind": "tech") follow:
 - Cover where it runs, login, where data is stored, and whether it needs uploads, payments or external APIs, phrased for this app. "policy" is "" for tech cards.
 
 Rules for all cards:
+- Every option has "difficulty": how much choosing it adds to the build for a non-developer working with an AI coding agent, and "effort": one short Korean phrase on why (e.g. "웹훅·환불 처리 필요"). Compare options within a card honestly; the simplest option is usually "easy".
 - At most ${MAX_CARDS} cards in total, 2 to 4 options each, exactly one option with "recommended": true.
 - Recommend the simplest option that still satisfies the request.
 - "why" says in one sentence what goes wrong later if this is left undecided.
