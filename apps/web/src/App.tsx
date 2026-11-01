@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deriveProfile, recommendRules, recommendedAnswers, toDecisions, translatableTexts } from '@spec/core';
-import type { Answers, Card, CustomAnswers, Generated, SpecInput, Task } from '@spec/core';
+import type { Answers, Card, CustomAnswers, Generated, Plan, SpecInput } from '@spec/core';
 import { fetchCards, fetchTasks, fetchTranslate } from './api.ts';
 import type { TranslateResult } from './api.ts';
 import { applyTheme, loadScheme, saveScheme } from './theme.ts';
@@ -36,7 +36,7 @@ export function App() {
   const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
   // A snapshot taken when the spec is generated. Rendering never recomputes it from the
   // live answers: an empty write-in answer would throw mid-render and blank the page.
-  const [spec, setSpec] = useState<{ input: SpecInput; tasks: Generated<Task[]>; translation: TranslateResult } | null>(null);
+  const [spec, setSpec] = useState<{ input: SpecInput; tasks: Generated<Plan>; translation: TranslateResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,7 +92,7 @@ export function App() {
     run(async () => {
       const decisions = toDecisions(cards, answers, custom);
       const tasks = await fetchTasks({ request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes });
-      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, notes, rules: selectedRules, tasks: tasks.data };
+      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, notes, rules: selectedRules, ...tasks.data };
       setSpec({ input, tasks, translation: await fetchTranslate(translatableTexts(input)) });
       setStep('spec');
     });

@@ -78,9 +78,29 @@ export interface Recommendation {
   reason: string | null;
 }
 
+export const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
+
 export interface Task {
   title: string;
   done: string;
+  /** An estimate for a vibe-coder working with an AI agent, not a commitment. */
+  difficulty: Difficulty;
+  /** One line on why it is that hard. */
+  reason: string;
+}
+
+export interface StackItem {
+  /** Which part of the app, e.g. "화면", "데이터 저장". */
+  area: string;
+  /** A product or library name; never translated. */
+  choice: string;
+  why: string;
+}
+
+export interface Plan {
+  tasks: Task[];
+  stack: StackItem[];
 }
 
 /** Where a piece of output came from. Shown in the UI: the contest forbids passing fixed output off as AI output. */

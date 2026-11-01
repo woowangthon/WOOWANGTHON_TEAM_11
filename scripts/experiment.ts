@@ -107,7 +107,7 @@ for (const [i, request] of REQUESTS.entries()) {
     const rules = recommendRules(profile).filter((r) => r.recommended).map((r) => r.rule);
     const decisions = toDecisions(cards.data.cards, answers);
     const tasks = await generateTasks(prep, request, decisions, rules, profile);
-    spec = buildSpec({ request, summary: cards.data.summary, decisions, notes: '', rules, tasks: tasks.data });
+    spec = buildSpec({ request, summary: cards.data.summary, decisions, notes: '', rules, ...tasks.data });
     writeFileSync(saved[0], spec);
   }
   let plain = read(saved[1]);
