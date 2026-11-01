@@ -25,10 +25,15 @@ export function cardsUser(request: string): string {
   return `App request:\n"""${request}"""`;
 }
 
-export const TASKS_SYSTEM = `You turn a decided app specification into an ordered build plan for an AI coding agent.
-Return JSON only: {"tasks": [{"title": string, "done": string}]}
+export const TASKS_SYSTEM = `You turn a decided app specification into an ordered build plan for an AI coding agent, and recommend a tech stack.
+Return JSON only:
+{"tasks": [{"title": string, "done": string, "difficulty": "easy" | "medium" | "hard", "reason": string}],
+ "stack": [{"area": string, "choice": string, "why": string}]}
 - 4 to 10 tasks, smallest working version first, each finishable in one session.
 - "title" is an imperative instruction in Korean. "done" is a checkable completion condition in Korean.
+- "difficulty" estimates how hard the task is for a non-developer working with an AI coding agent; "reason" says why in one short Korean sentence.
+- 3 to 6 stack items: "area" in Korean (e.g. 화면, 데이터 저장, 로그인, 배포), "choice" a concrete product or library name, "why" one short Korean sentence. Prefer free-tier, widely used options that coding agents know well.
+- The stack must not contradict the decisions (e.g. no server database when the owner chose device storage).
 - Respect every decision and rule given. Do not add features that were not requested.`;
 
 export function tasksUser(request: string, decisions: Decision[], rules: Rule[], notes = ''): string {

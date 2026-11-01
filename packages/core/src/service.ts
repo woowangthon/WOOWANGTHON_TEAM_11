@@ -2,9 +2,9 @@ import { FALLBACK_CARDS, MAX_CARDS, parseCards } from './cards.ts';
 import { chatJson, extractJson } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import { CARDS_SYSTEM, TASKS_SYSTEM, cardsUser, tasksUser } from './prompts.ts';
-import { fallbackTasks, parseTasks } from './tasks.ts';
+import { fallbackPlan, parsePlan } from './tasks.ts';
 import { MAX_CUSTOM_ANSWER_CHARS } from './profile.ts';
-import type { Card, Decision, Profile, Rule, Source, Task } from './types.ts';
+import type { Card, Decision, Plan, Profile, Rule, Source } from './types.ts';
 
 export const MAX_REQUEST_CHARS = 2000;
 
@@ -50,12 +50,12 @@ export async function generateTasks(
   rules: Rule[],
   profile: Profile,
   notes = '',
-): Promise<Generated<Task[]>> {
+): Promise<Generated<Plan>> {
   try {
     const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes));
-    return { data: parseTasks(extractJson(res.text)), source: 'ai', model: res.model, error: null };
+    return { data: parsePlan(extractJson(res.text)), source: 'ai', model: res.model, error: null };
   } catch (err) {
-    return { data: fallbackTasks(profile), source: 'fallback', model: null, error: (err as Error).message };
+    return { data: fallbackPlan(profile), source: 'fallback', model: null, error: (err as Error).message };
   }
 }
 

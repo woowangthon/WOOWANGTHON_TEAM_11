@@ -1,4 +1,4 @@
-import type { Decision, Rule, Task } from './types.ts';
+import type { Decision, Difficulty, Rule, StackItem, Task } from './types.ts';
 
 export type SpecLang = 'en' | 'ko';
 
@@ -10,6 +10,7 @@ export interface SpecInput {
   notes: string;
   rules: Rule[];
   tasks: Task[];
+  stack: StackItem[];
 }
 
 const HEADINGS = {
@@ -24,6 +25,9 @@ const HEADINGS = {
     plan: '## Build plan',
     planNote: 'Work through these in order. Finish and verify one before starting the next.',
     doneWhen: 'Done when',
+    difficulty: { easy: 'easy', medium: 'medium', hard: 'hard' },
+    stack: '## Recommended stack',
+    stackNote: 'Use these unless a decision above says otherwise.',
     style: '## Working style',
     styleLines: [
       '- If a requirement is ambiguous and not covered above, ask one question instead of guessing.',
@@ -41,6 +45,9 @@ const HEADINGS = {
     plan: '## 작업 계획',
     planNote: '순서대로 진행하고, 하나를 끝내고 확인한 뒤 다음으로 넘어가세요.',
     doneWhen: '완료 조건',
+    difficulty: { easy: '하', medium: '중', hard: '상' },
+    stack: '## 추천 기술 스택',
+    stackNote: '위에서 정한 것과 충돌하지 않는 한 이 스택을 쓰세요.',
     style: '## 작업 방식',
     styleLines: [
       '- 위에 없는 애매한 요구사항은 추측하지 말고 질문 하나로 확인하세요.',
@@ -57,7 +64,8 @@ const HEADINGS = {
  */
 export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
   const h = HEADINGS[lang];
-  const { request, summary, decisions, notes, rules, tasks } = input;
+  const { request, summary, decisions, notes, rules, tasks, stack } = input;
+  const level = (d: Difficulty) => (lang === 'en' ? `difficulty: ${h.difficulty[d]}` : `난이도: ${h.difficulty[d]}`);
   const section = (category: Rule['category']) =>
     rules.filter((r) => r.category === category).map((r) => `- ${lang === 'en' ? r.instruction : r.instructionKo}`);
   const engineering = section('engineering');
@@ -77,11 +85,12 @@ export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
   if (notes.trim()) lines.push('', h.notes, notes.trim());
   if (engineering.length) lines.push('', h.engineering, ...engineering);
   if (security.length) lines.push('', h.security, ...security);
+  if (stack.length) lines.push('', h.stack, h.stackNote, ...stack.map((s) => `- ${s.area}: **${s.choice}**${s.why ? ` — ${s.why}` : ''}`));
   lines.push(
     '',
     h.plan,
     h.planNote,
-    ...tasks.map((t, i) => `${i + 1}. ${t.title}${t.done ? `\n   - ${h.doneWhen}: ${t.done}` : ''}`),
+    ...tasks.map((t, i) => `${i + 1}. ${t.title} [${level(t.difficulty)}]${t.done ? `\n   - ${h.doneWhen}: ${t.done}` : ''}`),
     '',
     h.style,
     ...h.styleLines,
@@ -96,7 +105,8 @@ export function translatableTexts(input: SpecInput): string[] {
     input.summary,
     input.notes,
     ...input.decisions.flatMap((d) => [d.question, d.answer]),
-    ...input.tasks.flatMap((t) => [t.title, t.done]),
+    ...input.tasks.flatMap((t) => [t.title, t.done, t.reason]),
+    ...input.stack.flatMap((s) => [s.area, s.why]),
   ];
 }
 
@@ -113,6 +123,7 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
     summary: next(),
     notes: next(),
     decisions: input.decisions.map(() => ({ question: next(), answer: next() })),
-    tasks: input.tasks.map(() => ({ title: next(), done: next() })),
+    tasks: input.tasks.map((t) => ({ ...t, title: next(), done: next(), reason: next() })),
+    stack: input.stack.map((s) => ({ ...s, area: next(), why: next() })),
   };
 }

@@ -8,7 +8,8 @@ import {
   buildSpec,
   deriveProfile,
   extractJson,
-  fallbackTasks,
+  fallbackPlan,
+  parsePlan,
   generateCards,
   parseCards,
   recommendRules,
@@ -145,7 +146,7 @@ test('buildSpec includes every decision and only the chosen rules', () => {
     decisions: toDecisions(FALLBACK_CARDS, answers),
     notes: '',
     rules,
-    tasks: fallbackTasks(DEFAULT_PROFILE),
+    ...fallbackPlan(DEFAULT_PROFILE),
   });
   for (const card of FALLBACK_CARDS) assert.ok(spec.includes(card.question), card.id);
   assert.ok(spec.includes('## Security rules'));
@@ -175,7 +176,8 @@ test('withTexts is the exact inverse of translatableTexts', () => {
   const input = {
     request: 'r', summary: '', notes: 'n', rules: [],
     decisions: [{ question: 'q', answer: 'a' }],
-    tasks: [{ title: 't', done: 'd' }],
+    tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why' }],
+    stack: [{ area: '화면', choice: 'React', why: 'w' }],
   };
   assert.deepEqual(withTexts(input, translatableTexts(input)), input);
   assert.throws(() => withTexts(input, ['x']), /expected/);
@@ -183,7 +185,7 @@ test('withTexts is the exact inverse of translatableTexts', () => {
 
 test('the Korean spec uses Korean instructions and keeps the same sections', () => {
   const input = {
-    request: 'r', summary: '', notes: '메모', decisions: [], tasks: [],
+    request: 'r', summary: '', notes: '메모', decisions: [], tasks: [], stack: [],
     rules: ALL_RULES.filter((r) => r.id === 'sec-secrets'),
   };
   const ko = buildSpec(input, 'ko');
@@ -207,4 +209,29 @@ test('skill recommendations stay capped and no source dominates', () => {
   }
   const prod = recommendSkills(profiles[1]).map((r) => r.skill.id);
   assert.ok(prod.includes('tdd'));
+});
+
+test('parsePlan rejects an unknown difficulty instead of showing a blank badge', () => {
+  assert.throws(() => parsePlan({ tasks: [{ title: 't', difficulty: 'impossible' }] }), /difficulty/);
+  const plan = parsePlan({ tasks: [{ title: 't', difficulty: 'easy' }], stack: [{ area: '화면', choice: 'React' }, { area: '' }] });
+  assert.equal(plan.tasks[0].difficulty, 'easy');
+  assert.equal(plan.stack.length, 1);
+});
+
+test('the fallback stack never contradicts the storage decision', () => {
+  const local = fallbackPlan({ ...DEFAULT_PROFILE, storage: 'local' }).stack.map((s) => s.choice).join(' ');
+  assert.doesNotMatch(local, /Supabase|Postgres/);
+  const server = fallbackPlan({ ...DEFAULT_PROFILE, storage: 'server-db' }).stack.map((s) => s.choice).join(' ');
+  assert.match(server, /Supabase/);
+});
+
+test('the spec shows each task difficulty and the stack in both languages', () => {
+  const input = {
+    request: 'r', summary: '', notes: '', decisions: [], rules: [],
+    tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '' }],
+    stack: [{ area: '화면', choice: 'React', why: '' }],
+  };
+  assert.match(buildSpec(input, 'en'), /\[difficulty: hard\]/);
+  assert.match(buildSpec(input, 'en'), /## Recommended stack[\s\S]*\*\*React\*\*/);
+  assert.match(buildSpec(input, 'ko'), /\[난이도: 상\]/);
 });
