@@ -5,6 +5,17 @@ import type { Rule } from '../types.ts';
 // so the user is not asked to read rules about payments for a to-do app.
 export const SECURITY_RULES: Rule[] = [
   {
+    id: 'sec-money-integrity',
+    category: 'security',
+    title: '돈이 걸린 데이터는 기록으로 남기기',
+    instructionKo:
+      '금액(벌금·잔액·포인트·결제)은 덮어쓰지 말고 변경 내역을 쌓아서 계산한다. 누가 언제 무엇을 바꿨는지 감사 로그를 남긴다. 결제 웹훅은 결제사 이벤트 ID를 저장해 같은 알림이 두 번 와도 한 번만 처리(멱등성)하고, 결제 상태는 서버에서 결제사에 다시 확인한다. 취소·환불은 별도 상태로 다룬다.',
+    instruction:
+      'Never overwrite an amount (fine, balance, points, payment) in place: record each change as an entry and compute the current value from the entries. Keep an audit log of who changed what and when. Make payment webhooks idempotent by storing the provider event id and ignoring repeats, re-check payment status with the provider on the server, and model cancellation and refund as explicit states.',
+    why: '돈은 한 번 어긋나면 되돌리기 어렵습니다. 웹훅이 두 번 오거나 관리자가 금액을 고쳤을 때 이유와 이력이 없으면 분쟁이 납니다.',
+    appliesTo: (p) => (p.money === 'yes' ? '돈·벌금·포인트를 계산하거나 주고받음' : null),
+  },
+  {
     id: 'sec-secrets',
     category: 'security',
     title: '비밀키는 코드에 넣지 않기',

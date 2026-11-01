@@ -51,9 +51,9 @@ test('deriveProfile throws on an answer that is not an option', () => {
 });
 
 test('choosing a login implies multiple users even if the card did not say so', () => {
-  const cards = [{ id: 'c1', question: 'q', why: '', options: [
-    { id: 'o1', label: 'a', detail: '', recommended: true, sets: { auth: 'email' as const } },
-    { id: 'o2', label: 'b', detail: '', recommended: false, sets: {} },
+  const cards = [{ id: 'c1', kind: 'tech' as const, question: 'q', why: '', options: [
+    { id: 'o1', label: 'a', detail: '', recommended: true, sets: { auth: 'email' as const }, policy: '' },
+    { id: 'o2', label: 'b', detail: '', recommended: false, sets: {}, policy: '' },
   ] }];
   const profile = deriveProfile(cards, { c1: 'o1' });
   assert.equal(profile.users, 'multi');
@@ -142,7 +142,7 @@ test('buildSpec includes every decision and only the chosen rules', () => {
   const rules = ALL_RULES.filter((r) => r.id === 'sec-secrets');
   const spec = buildSpec({
     request: '할 일 앱',
-    summary: '',
+    summary: '', domainRules: [],
     decisions: toDecisions(FALLBACK_CARDS, answers),
     notes: '',
     rules,
@@ -174,10 +174,10 @@ test('every rule has a Korean instruction', () => {
 
 test('withTexts is the exact inverse of translatableTexts', () => {
   const input = {
-    request: 'r', summary: '', notes: 'n', rules: [],
+    request: 'r', summary: '', domainRules: [], notes: 'n', rules: [],
     decisions: [{ question: 'q', answer: 'a' }],
     tasks: [{ title: 't', done: 'd', difficulty: 'hard' as const, reason: 'why', watchouts: ['w1'], securityChecks: [{ what: 'hw', how: 'hh' }] }],
-    stack: [{ area: '화면', choice: 'React', why: 'w' }],
+    stack: [{ area: '화면', choice: 'React', why: 'w', connects: 'c' }],
   };
   assert.deepEqual(withTexts(input, translatableTexts(input)), input);
   assert.throws(() => withTexts(input, ['x']), /expected/);
@@ -185,7 +185,7 @@ test('withTexts is the exact inverse of translatableTexts', () => {
 
 test('the Korean spec uses Korean instructions and keeps the same sections', () => {
   const input = {
-    request: 'r', summary: '', notes: '메모', decisions: [], tasks: [], stack: [],
+    request: 'r', summary: '', domainRules: [], notes: '메모', decisions: [], tasks: [], stack: [],
     rules: ALL_RULES.filter((r) => r.id === 'sec-secrets'),
   };
   const ko = buildSpec(input, 'ko');
@@ -227,9 +227,9 @@ test('the fallback stack never contradicts the storage decision', () => {
 
 test('the spec shows each task difficulty and the stack in both languages', () => {
   const input = {
-    request: 'r', summary: '', notes: '', decisions: [], rules: [],
+    request: 'r', summary: '', domainRules: [], notes: '', decisions: [], rules: [],
     tasks: [{ title: 'Build it', done: '', difficulty: 'hard' as const, reason: '', watchouts: ['Handle empty input'], securityChecks: [{ what: 'secret', how: 'search' }] }],
-    stack: [{ area: '화면', choice: 'React', why: '' }],
+    stack: [{ area: '화면', choice: 'React', why: '', connects: '' }],
   };
   assert.match(buildSpec(input, 'en'), /\[difficulty: hard\]/);
   assert.match(buildSpec(input, 'en'), /## Recommended stack[\s\S]*\*\*React\*\*/);

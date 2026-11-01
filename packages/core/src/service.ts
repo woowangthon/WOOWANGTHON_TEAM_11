@@ -50,9 +50,10 @@ export async function generateTasks(
   rules: Rule[],
   profile: Profile,
   notes = '',
+  domainRules: string[] = [],
 ): Promise<Generated<Plan>> {
   try {
-    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes));
+    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules));
     return { data: parsePlan(extractJson(res.text)), source: 'ai', model: res.model, error: null };
   } catch (err) {
     return { data: fallbackPlan(profile), source: 'fallback', model: null, error: (err as Error).message };
@@ -61,7 +62,7 @@ export async function generateTasks(
 
 /** Validates decisions that arrived from a client. */
 export function parseDecisions(raw: unknown): Decision[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_CARDS) throw new Error('decisions: expected 1-7 items');
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_CARDS) throw new Error(`decisions: expected 1-${MAX_CARDS} items`);
   return raw.map((d, i) => {
     const item = d as Record<string, unknown>;
     if (typeof item?.question !== 'string' || typeof item?.answer !== 'string') throw new Error(`decisions[${i}]: expected strings`);

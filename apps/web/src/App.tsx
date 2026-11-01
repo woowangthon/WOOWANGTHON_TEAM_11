@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deriveProfile, recommendRules, recommendedAnswers, toDecisions, translatableTexts } from '@spec/core';
+import { deriveProfile, recommendRules, recommendedAnswers, toDecisions, toDomainRules, translatableTexts } from '@spec/core';
 import type { Answers, Card, CustomAnswers, Generated, Plan, SpecInput } from '@spec/core';
 import { fetchCards, fetchTasks, fetchTranslate } from './api.ts';
 import type { TranslateResult } from './api.ts';
@@ -93,8 +93,9 @@ export function App() {
   const makeSpec = () =>
     run(async () => {
       const decisions = toDecisions(cards, answers, custom);
-      const tasks = await fetchTasks({ request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes });
-      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, notes, rules: selectedRules, ...tasks.data };
+      const domainRules = toDomainRules(cards, answers, custom);
+      const tasks = await fetchTasks({ request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes, domainRules });
+      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, domainRules, notes, rules: selectedRules, ...tasks.data };
       setSpec({ input, tasks, translation: await fetchTranslate(translatableTexts(input)) });
       setStep('spec');
     });

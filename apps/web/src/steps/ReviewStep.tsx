@@ -70,7 +70,7 @@ export function ReviewStep({ rules, onBack }: Props) {
         <h2 className="SectionTitle"><ScanSearch size={18} /> 만든 코드 점검</h2>
         <p className="Muted">
           코딩 AI가 만든 코드를 붙여넣으면 고른 규칙 {rules.length}개를 지켰는지 봅니다.
-          키 하드코딩·빈 catch·300줄 초과 파일은 <b>규칙 검사</b>로 확정하고, 나머지는 <b>AI가 판단</b>합니다. 고칠지는 직접 고릅니다.
+          키 하드코딩·빈 catch는 <b>규칙 검사</b>로 확정하고(긴 파일은 확인 필요로 표시), 나머지는 <b>AI가 판단</b>합니다. 고칠지는 직접 고릅니다.
         </p>
         <textarea
           className="Textarea code"

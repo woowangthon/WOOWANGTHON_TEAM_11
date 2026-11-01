@@ -24,7 +24,7 @@ export const fetchCards = (request: string) =>
 
 export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
 
-export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile; notes: string }) =>
+export const fetchTasks = (input: { request: string; decisions: Decision[]; ruleIds: string[]; profile: Profile; notes: string; domainRules: string[] }) =>
   post<Generated<Plan>>('/api/tasks', input);
 
 export interface TranslateResult {

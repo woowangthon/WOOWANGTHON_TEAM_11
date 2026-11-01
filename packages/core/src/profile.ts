@@ -32,6 +32,8 @@ export function deriveProfile(cards: Card[], answers: Answers): Profile {
   // Accounts only exist to tell users apart. The model often sets `auth` without `users`,
   // and leaving `users: single` would switch off the server-side permission rule.
   if (profile.auth !== 'none') profile.users = 'multi';
+  // Taking payments always means handling money, even if no card said so.
+  if (profile.payment === 'yes') profile.money = 'yes';
   return profile;
 }
 
@@ -47,6 +49,23 @@ export function toDecisions(cards: Card[], answers: Answers, custom: CustomAnswe
     const option = card.options.find((o) => o.id === answers[card.id]);
     if (!option) throw new Error(`card "${card.id}" has no answer`);
     return { question: card.question, answer: option.label };
+  });
+}
+
+/**
+ * The business rules the owner settled on domain cards, one sentence each, for the spec.
+ * A typed answer is the rule itself; an unanswered domain card adds nothing.
+ */
+export function toDomainRules(cards: Card[], answers: Answers, custom: CustomAnswers = {}): string[] {
+  return cards.flatMap((card) => {
+    if (card.kind !== 'domain') return [];
+    const chosen = answers[card.id];
+    if (chosen === CUSTOM_ANSWER) {
+      const text = custom[card.id]?.trim();
+      return text ? [`${card.question} → ${text}`] : [];
+    }
+    const option = card.options.find((o) => o.id === chosen);
+    return option ? [option.policy || `${card.question} → ${option.label}`] : [];
   });
 }
 
