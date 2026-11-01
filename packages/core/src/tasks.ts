@@ -1,10 +1,10 @@
-import { DIFFICULTIES } from './types.ts';
-import type { Difficulty, HumanCheck, Plan, Profile, StackItem, Task } from './types.ts';
+import { DIFFICULTIES, FREE_TIERS } from './types.ts';
+import type { Budget, BudgetItem, Difficulty, SecurityCheck, Plan, Profile, StackItem, Task } from './types.ts';
 
 const MAX_TASKS = 10;
 const MAX_STACK = 6;
 const MAX_WATCHOUTS = 3;
-const MAX_HUMAN_CHECKS = 2;
+const MAX_SECURITY_CHECKS = 2;
 
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
@@ -26,13 +26,13 @@ export function parsePlan(raw: unknown): Plan {
         .map((w) => text(w, 140))
         .filter(Boolean)
         .slice(0, MAX_WATCHOUTS),
-      humanChecks: (Array.isArray(task.humanChecks) ? task.humanChecks : [])
-        .flatMap((c): HumanCheck[] => {
+      securityChecks: (Array.isArray(task.securityChecks) ? task.securityChecks : [])
+        .flatMap((c): SecurityCheck[] => {
           const check = c as Record<string, unknown>;
           const what = text(check?.what, 120);
           return what ? [{ what, how: text(check.how, 240) }] : [];
         })
-        .slice(0, MAX_HUMAN_CHECKS),
+        .slice(0, MAX_SECURITY_CHECKS),
     };
   });
   const stack = (Array.isArray(obj.stack) ? obj.stack : []).slice(0, MAX_STACK).flatMap((s): StackItem[] => {
@@ -41,14 +41,14 @@ export function parsePlan(raw: unknown): Plan {
     const choice = text(item?.choice, 60);
     return area && choice ? [{ area, choice, why: text(item.why, 120) }] : [];
   });
-  return { tasks, stack };
+  return { tasks, stack, budget: parseBudget(obj.budget) };
 }
 
 /** A generic plan derived from the profile alone; used when the AI call fails. */
 export function fallbackPlan(profile: Profile): Plan {
   // The fallback carries no per-task guidance: the rule-based human checklist still applies.
   const t = (title: string, done: string, difficulty: Difficulty, reason: string): Task => ({
-    title, done, difficulty, reason, watchouts: [], humanChecks: [],
+    title, done, difficulty, reason, watchouts: [], securityChecks: [],
   });
   const tasks: Task[] = [
     t('규칙 파일의 폴더 구조대로 프로젝트 뼈대 만들기', '빈 화면이 실행되고 폴더 구조가 규칙과 일치함', 'easy', '템플릿으로 바로 시작 가능'),
@@ -61,7 +61,7 @@ export function fallbackPlan(profile: Profile): Plan {
   if (profile.externalApi === 'yes') tasks.push(t('외부 API를 서비스 모듈로 감싸 연결', '키가 코드에 없고 API 실패 시 화면에 안내가 뜸', 'medium', '키 관리와 실패 처리가 필요'));
   if (profile.payment === 'yes') tasks.push(t('결제 서비스 연동과 서버측 결제 확인', '웹훅으로 확인된 결제만 완료 처리됨', 'hard', '웹훅·서버 검증 없이는 결제 우회 가능'));
   tasks.push(t('나머지 기능을 하나씩 추가하고 매번 테스트 실행', '요청한 기능이 모두 동작하고 테스트가 통과함', 'medium', '기능 수에 비례'));
-  return { tasks, stack: fallbackStack(profile) };
+  return { tasks, stack: fallbackStack(profile), budget: fallbackBudget(profile) };
 }
 
 /** Widely used, free-tier-friendly defaults per profile trait. */
@@ -78,4 +78,40 @@ export function fallbackStack(profile: Profile): StackItem[] {
   if (profile.payment === 'yes') add('결제', 'Toss Payments', '국내 결제수단, 웹훅으로 서버 검증');
   if (profile.platform === 'web') add('배포', 'Vercel', '무료로 시작, Git 연결만으로 자동 배포');
   return stack.slice(0, MAX_STACK);
+}
+
+function parseBudget(raw: unknown): Budget {
+  const b = (raw ?? {}) as Record<string, unknown>;
+  // A missing or odd verdict is shown as "partial": claiming "fully free" without basis is the worse error.
+  const freeTier = FREE_TIERS.includes(b.freeTier as Budget['freeTier']) ? (b.freeTier as Budget['freeTier']) : 'partial';
+  const items = (Array.isArray(b.items) ? b.items : []).slice(0, 8).flatMap((i): BudgetItem[] => {
+    const item = i as Record<string, unknown>;
+    const name = text(item?.name, 40);
+    return name ? [{ name, free: text(item.free, 120), paid: text(item.paid, 120) }] : [];
+  });
+  return { freeTier, monthly: text(b.monthly, 40) || '추정 불가', summary: text(b.summary, 200), items };
+}
+
+/** Rule-based estimate from the profile, used when the AI call fails. Small scale, ~100 users. */
+export function fallbackBudget(profile: Profile): Budget {
+  const items: BudgetItem[] = [];
+  const add = (name: string, free: string, paid: string) => items.push({ name, free, paid });
+  if (profile.platform === 'web') add('호스팅 (Vercel)', '개인 프로젝트는 무료', '상업용·팀은 월 약 3만원부터');
+  if (profile.platform === 'mobile') add('앱 스토어 등록', '테스트 배포는 무료', 'Google Play 약 3.5만원(1회), Apple 연 약 13만원');
+  if (profile.storage === 'server-db') add('데이터베이스 (Supabase)', '500MB·소규모 무료, 1주 미사용 시 일시정지', '월 약 3.5만원부터');
+  if (profile.auth !== 'none') add('로그인 (Supabase Auth 등)', '월 활성 사용자 수만 명까지 무료', '대규모부터 과금');
+  if (profile.externalApi === 'yes') add('외부/AI API', '무료 티어는 하루 요청 수 제한', '사용량 비례 (AI는 요청당 수원~수십원)');
+  if (profile.upload === 'yes') add('파일 저장소', '1GB 안팎 무료', '용량·전송량 비례');
+  if (profile.payment === 'yes') add('결제 (PG)', '가입·테스트 무료', '결제 금액의 약 3% 수수료');
+  const paidOnly = profile.payment === 'yes' || profile.platform === 'mobile';
+  const freeTier: Budget['freeTier'] = paidOnly ? 'partial' : profile.externalApi === 'yes' ? 'partial' : 'full';
+  return {
+    freeTier,
+    monthly: freeTier === 'full' ? '0원' : '0원~수만원',
+    summary:
+      freeTier === 'full'
+        ? '소규모라면 무료 티어만으로 운영할 수 있습니다. 사용자가 늘거나 상업적으로 쓰면 유료로 바뀝니다.'
+        : '개발·시험은 무료로 가능하지만, 외부 API 사용량이나 결제·앱 스토어 비용이 생깁니다.',
+    items,
+  };
 }

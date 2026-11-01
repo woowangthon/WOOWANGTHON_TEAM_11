@@ -6,16 +6,18 @@ import {
   boardKey,
   boardMarkdown,
   buildSpec,
-  humanChecksFor,
+  securityChecksFor,
   moveTask,
   taskCheckKey,
   toggleCheck,
+  fallbackBudget,
+  parsePlan,
 } from '../src/index.ts';
-import type { Task } from '../src/index.ts';
+import type { Profile, Task } from '../src/index.ts';
 
 const tasks: Task[] = [
-  { title: '로그인', done: '', difficulty: 'hard', reason: '', watchouts: ['세션 만료'], humanChecks: [{ what: '다른 계정 접근', how: '두 계정으로 시도' }] },
-  { title: '목록', done: '', difficulty: 'easy', reason: '', watchouts: [], humanChecks: [] },
+  { title: '로그인', done: '', difficulty: 'hard', reason: '', watchouts: ['세션 만료'], securityChecks: [{ what: '다른 계정 접근', how: '두 계정으로 시도' }] },
+  { title: '목록', done: '', difficulty: 'easy', reason: '', watchouts: [], securityChecks: [] },
 ];
 
 test('a task cannot reach done while a human check is unticked', () => {
@@ -34,17 +36,28 @@ test('the same plan keeps its board; a different plan gets a new one', () => {
   assert.notEqual(boardKey('앱', tasks), boardKey('다른 앱', tasks));
 });
 
-test('an app that calls an AI or external API gets the secret-leak check', () => {
-  assert.ok(!humanChecksFor(DEFAULT_PROFILE).some((c) => c.id === 'secret-leak'));
-  const withApi = humanChecksFor({ ...DEFAULT_PROFILE, externalApi: 'yes' });
-  const leak = withApi.find((c) => c.id === 'secret-leak');
-  assert.ok(leak && leak.steps.some((s) => s.includes('Network')));
-  assert.ok(humanChecksFor(DEFAULT_PROFILE).some((c) => c.id === 'run-it-yourself'));
+test('an app that calls an AI or external API gets the key-exposure checks', () => {
+  const ids = (p: Profile) => securityChecksFor(p).map((c) => c.id);
+  assert.ok(!ids(DEFAULT_PROFILE).includes('key-in-browser'));
+  const withApi = securityChecksFor({ ...DEFAULT_PROFILE, externalApi: 'yes' });
+  assert.ok(withApi.some((c) => c.id === 'env-committed' && c.steps.some((s) => s.includes('.gitignore'))));
+  assert.ok(withApi.some((c) => c.id === 'key-in-browser' && c.steps.some((s) => s.includes('Network'))));
+});
+
+test('the checklist is security only: a plain local app gets nothing to sign off', () => {
+  assert.deepEqual(securityChecksFor(DEFAULT_PROFILE), []);
+});
+
+test('the budget never claims fully free for a paid-only setup, and the AI value is validated', () => {
+  assert.notEqual(fallbackBudget({ ...DEFAULT_PROFILE, payment: 'yes' }).freeTier, 'full');
+  assert.equal(fallbackBudget(DEFAULT_PROFILE).freeTier, 'full');
+  const plan = parsePlan({ tasks: [{ title: 't', difficulty: 'easy' }], budget: { freeTier: 'totally', monthly: '0원' } });
+  assert.equal(plan.budget.freeTier, 'partial');
 });
 
 test('markdown export reflects columns and ticks', () => {
   const state = moveTask(toggleCheck(EMPTY_BOARD, taskCheckKey(0, 0)), tasks, 0, 'done');
-  const md = boardMarkdown(state, tasks, humanChecksFor(DEFAULT_PROFILE));
+  const md = boardMarkdown(state, tasks, securityChecksFor(DEFAULT_PROFILE));
   assert.match(md, /- \[x\] #1 로그인/);
   assert.match(md, /- \[ \] #2 목록/);
   assert.match(md, /\[x\] 사람 확인: 다른 계정 접근/);

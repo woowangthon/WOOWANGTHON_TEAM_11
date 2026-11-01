@@ -46,9 +46,6 @@ export function PlanView({ result }: { result: Generated<Plan> }) {
                 {t.watchouts.length > 0 && (
                   <span className="RuleWhy"><b>다룰 문제</b> · {t.watchouts.join(' / ')}</span>
                 )}
-                {t.humanChecks.map((c) => (
-                  <span key={c.what} className="HumanCheck"><b>사람만 판단</b> · {c.what} — {c.how}</span>
-                ))}
               </span>
               <Dots level={t.difficulty} />
             </li>

@@ -57,22 +57,7 @@ export function Sidebar({ profile, rules, decided }: Props) {
       </section>
 
       <section className="Panel">
-        <h3 className="SideTitle"><Wrench size={14} /> 유지보수 규칙 {engineering.length}</h3>
-        {engineering.length ? (
-          <ul className="MiniList">
-            {engineering.map((r) => <li key={r.id} className="MiniItem"><Wrench size={12} />{r.title}</li>)}
-          </ul>
-        ) : <p className="Empty">선택된 유지보수 규칙이 없습니다.</p>}
-        <h3 className="SideTitle"><ShieldCheck size={14} /> 보안 규칙 {security.length}</h3>
-        {security.length ? (
-          <ul className="MiniList">
-            {security.map((r) => <li key={r.id} className="MiniItem"><ShieldCheck size={12} />{r.title}</li>)}
-          </ul>
-        ) : <p className="Empty">선택된 보안 규칙이 없습니다.</p>}
-      </section>
-
-      <section className="Panel">
-        <h3 className="SideTitle"><Blocks size={14} /> 추천 Claude Code 스킬</h3>
+        <h3 className="SideTitle"><Blocks size={14} /> 추천 스킬</h3>
         <ul className="MiniList">
           {skills.map(({ skill, reason }) => (
             <li key={skill.id} className="MiniItem">
@@ -90,6 +75,21 @@ export function Sidebar({ profile, rules, decided }: Props) {
         </ul>
       </section>
       <AiSettings />
+
+      <section className="Panel">
+        <h3 className="SideTitle"><Wrench size={14} /> 유지보수 규칙 {engineering.length}</h3>
+        {engineering.length ? (
+          <ul className="MiniList">
+            {engineering.map((r) => <li key={r.id} className="MiniItem"><Wrench size={12} />{r.title}</li>)}
+          </ul>
+        ) : <p className="Empty">선택된 유지보수 규칙이 없습니다.</p>}
+        <h3 className="SideTitle"><ShieldCheck size={14} /> 보안 규칙 {security.length}</h3>
+        {security.length ? (
+          <ul className="MiniList">
+            {security.map((r) => <li key={r.id} className="MiniItem"><ShieldCheck size={12} />{r.title}</li>)}
+          </ul>
+        ) : <p className="Empty">선택된 보안 규칙이 없습니다.</p>}
+      </section>
     </aside>
   );
 }

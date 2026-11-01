@@ -1,4 +1,4 @@
-import type { HumanCheckRule } from './humanChecks.ts';
+import type { SecurityCheckRule } from './securityChecks.ts';
 import type { Difficulty, Task } from './types.ts';
 
 export const COLUMNS = ['todo', 'doing', 'verify', 'done'] as const;
@@ -26,7 +26,7 @@ export const taskCheckKey = (taskIndex: number, checkIndex: number) => `${taskIn
 
 /** Unticked human checks blocking a task from "done". The person decides, not the AI. */
 export function blockingChecks(state: BoardState, task: Task, taskIndex: number): number {
-  return task.humanChecks.filter((_, j) => !state.checked[taskCheckKey(taskIndex, j)]).length;
+  return task.securityChecks.filter((_, j) => !state.checked[taskCheckKey(taskIndex, j)]).length;
 }
 
 /** Moving to done is refused while a human check is unticked; every other move is free. */
@@ -57,14 +57,14 @@ export function boardKey(request: string, tasks: Task[]): string {
 const LEVEL: Record<Difficulty, string> = { easy: '하', medium: '중', hard: '상' };
 
 /** A Markdown checklist that pastes into a GitHub issue, Notion or any tracker. */
-export function boardMarkdown(state: BoardState, tasks: Task[], rules: HumanCheckRule[]): string {
+export function boardMarkdown(state: BoardState, tasks: Task[], rules: SecurityCheckRule[]): string {
   const box = (on: boolean) => (on ? '[x]' : '[ ]');
   const lines: string[] = ['## 작업', ''];
   tasks.forEach((t, i) => {
     const col = columnOf(state, i);
     lines.push(`- ${box(col === 'done')} #${i + 1} ${t.title} (난이도 ${LEVEL[t.difficulty]}, ${COLUMN_LABEL[col]})`);
     for (const w of t.watchouts) lines.push(`  - 주의: ${w}`);
-    t.humanChecks.forEach((c, j) => lines.push(`  - ${box(!!state.checked[taskCheckKey(i, j)])} 사람 확인: ${c.what}`));
+    t.securityChecks.forEach((c, j) => lines.push(`  - ${box(!!state.checked[taskCheckKey(i, j)])} 사람 확인: ${c.what}`));
   });
   if (rules.length) {
     lines.push('', '## 사람이 직접 확인할 것', '');

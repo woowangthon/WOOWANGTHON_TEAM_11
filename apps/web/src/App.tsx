@@ -154,6 +154,7 @@ export function App() {
               translation={spec.translation}
               cardsResult={cardsResult}
               tasksResult={spec.tasks}
+              profile={profile}
               onBack={() => setStep('rules')}
               onReview={() => setStep('board')}
             />

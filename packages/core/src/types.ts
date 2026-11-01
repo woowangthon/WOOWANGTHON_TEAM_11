@@ -91,10 +91,10 @@ export interface Task {
   /** Problems this task must deal with, so the agent (and the owner) do not skip them. */
   watchouts: string[];
   /** What only a person can judge here, each with how to check it. AI output is not trusted for these. */
-  humanChecks: HumanCheck[];
+  securityChecks: SecurityCheck[];
 }
 
-export interface HumanCheck {
+export interface SecurityCheck {
   what: string;
   how: string;
 }
@@ -107,9 +107,27 @@ export interface StackItem {
   why: string;
 }
 
+export const FREE_TIERS = ['full', 'partial', 'none'] as const;
+
+export interface BudgetItem {
+  name: string;
+  free: string;
+  paid: string;
+}
+
+/** A rough running-cost estimate at small scale; shown as an estimate, never as a quote. */
+export interface Budget {
+  freeTier: (typeof FREE_TIERS)[number];
+  /** A KRW range, e.g. "0원~1만원". */
+  monthly: string;
+  summary: string;
+  items: BudgetItem[];
+}
+
 export interface Plan {
   tasks: Task[];
   stack: StackItem[];
+  budget: Budget;
 }
 
 /** Where a piece of output came from. Shown in the UI: the contest forbids passing fixed output off as AI output. */
