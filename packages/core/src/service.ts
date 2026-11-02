@@ -4,7 +4,8 @@ import type { LlmConfig } from './llm.ts';
 import { CARDS_SYSTEM, TASKS_SYSTEM, cardsUser, tasksUser } from './prompts.ts';
 import { fallbackPlan, parsePlan } from './tasks.ts';
 import { MAX_CUSTOM_ANSWER_CHARS } from './profile.ts';
-import type { Card, Decision, Plan, Profile, Rule, Source } from './types.ts';
+import type { CardsData, Decision, Plan, Profile, Rule, Source } from './types.ts';
+import { applyFloor, ruleFeasibility } from './feasibility.ts';
 
 export const MAX_REQUEST_CHARS = 2000;
 
@@ -34,12 +35,15 @@ export function validateRequest(request: unknown): string {
 export async function generateCards(
   llm: LlmConfig,
   request: string,
-): Promise<Generated<{ summary: string; cards: Card[] }>> {
+): Promise<Generated<CardsData>> {
   try {
     const res = await chatJson(llm, CARDS_SYSTEM, cardsUser(request));
-    return { data: parseCards(extractJson(res.text)), source: 'ai', model: res.model, error: null };
+    const data = parseCards(extractJson(res.text));
+    const feasibility = data.feasibility ? applyFloor(data.feasibility, request) : ruleFeasibility(request);
+    return { data: { ...data, feasibility }, source: 'ai', model: res.model, error: null };
   } catch (err) {
-    return { data: { summary: '', cards: FALLBACK_CARDS }, source: 'fallback', model: null, error: (err as Error).message };
+    const data = { summary: '', cards: FALLBACK_CARDS, feasibility: ruleFeasibility(request) };
+    return { data, source: 'fallback', model: null, error: (err as Error).message };
   }
 }
 
