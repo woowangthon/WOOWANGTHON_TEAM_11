@@ -1,0 +1,558 @@
+=== .gitignore ===
+node_modules
+.next
+.env
+.env.local
+
+=== .env.example ===
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+=== package.json ===
+{
+  "name": "club-dues",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": { "typescript": "^5.6.3", "@types/react": "^18.3.11", "@types/node": "^20.16.11" }
+}
+
+=== supabase/schema.sql ===
+-- Passwords are hashed by Supabase Auth (bcrypt); this app never sees or stores them.
+create table profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  name text not null default '',
+  role text not null default 'member' check (role in ('member', 'admin'))
+);
+
+-- Append-only: the current setting is the newest row. Who/when is the audit trail.
+create table fee_settings (
+  id bigserial primary key,
+  amount integer not null check (amount > 0 and amount <= 10000000),
+  due_date date not null,
+  changed_by uuid not null references profiles(id),
+  created_at timestamptz not null default now()
+);
+
+-- Append-only: a member's current status is their newest entry. No row = unpaid.
+create table payment_entries (
+  id bigserial primary key,
+  member_id uuid not null references profiles(id),
+  status text not null check (status in ('paid', 'unpaid')),
+  note text not null default '' check (char_length(note) <= 200),
+  changed_by uuid not null references profiles(id),
+  created_at timestamptz not null default now()
+);
+
+create function is_admin() returns boolean language sql stable security definer as $$
+  select exists (select 1 from profiles where id = auth.uid() and role = 'admin');
+$$;
+
+create function handle_new_user() returns trigger language plpgsql security definer as $$
+begin
+  insert into profiles (id, email) values (new.id, new.email);
+  return new;
+end $$;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function handle_new_user();
+
+alter table profiles enable row level security;
+alter table fee_settings enable row level security;
+alter table payment_entries enable row level security;
+
+create policy "own or admin read" on profiles for select using (id = auth.uid() or is_admin());
+create policy "logged-in read" on fee_settings for select using (auth.uid() is not null);
+create policy "admin insert" on fee_settings for insert with check (is_admin() and changed_by = auth.uid());
+create policy "own or admin read" on payment_entries for select using (member_id = auth.uid() or is_admin());
+create policy "admin insert" on payment_entries for insert with check (is_admin() and changed_by = auth.uid());
+-- No update/delete policies: entries can never be changed or removed.
+
+=== src/domain/dues.ts ===
+// Business rules only. No UI, no network.
+export type PaymentStatus = 'paid' | 'unpaid';
+export interface Member { id: string; email: string; name: string }
+export interface PaymentEntry { member_id: string; status: PaymentStatus; created_at: string }
+export interface FeeSetting { amount: number; due_date: string }
+export interface MemberStatus extends Member { status: PaymentStatus; updatedAt: string | null }
+
+export class ValidationError extends Error {}
+
+// Rule: one amount and one due date apply to every member.
+export function parseFeeSetting(input: unknown): FeeSetting {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const amount = o.amount;
+  if (typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0 || amount > 10_000_000) {
+    throw new ValidationError('회비는 1원 이상 1천만원 이하의 정수여야 합니다.');
+  }
+  const due = o.due_date;
+  if (typeof due !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due))) {
+    throw new ValidationError('납부 기한은 YYYY-MM-DD 형식이어야 합니다.');
+  }
+  return { amount, due_date: due };
+}
+
+// Rule: staff manually set a member's status after checking the bank record.
+export function parsePaymentChange(input: unknown): { memberId: string; status: PaymentStatus; note: string } {
+  const o = (input ?? {}) as Record<string, unknown>;
+  if (typeof o.memberId !== 'string' || !/^[0-9a-f-]{36}$/i.test(o.memberId)) throw new ValidationError('잘못된 회원 ID입니다.');
+  if (o.status !== 'paid' && o.status !== 'unpaid') throw new ValidationError('상태는 paid 또는 unpaid여야 합니다.');
+  const note = o.note ?? '';
+  if (typeof note !== 'string' || note.length > 200) throw new ValidationError('메모는 200자 이하여야 합니다.');
+  return { memberId: o.memberId, status: o.status, note };
+}
+
+export function parseCredentials(input: unknown): { email: string; password: string } {
+  const o = (input ?? {}) as Record<string, unknown>;
+  if (typeof o.email !== 'string' || o.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(o.email)) {
+    throw new ValidationError('이메일 형식이 올바르지 않습니다.');
+  }
+  if (typeof o.password !== 'string' || o.password.length < 6 || o.password.length > 72) {
+    throw new ValidationError('비밀번호는 6~72자여야 합니다.');
+  }
+  return { email: o.email.trim().toLowerCase(), password: o.password };
+}
+
+// Current status is derived from the newest entry; no entry means unpaid.
+export function currentStatuses(members: Member[], entries: PaymentEntry[]): MemberStatus[] {
+  const latest = new Map<string, PaymentEntry>();
+  for (const e of entries) {
+    const prev = latest.get(e.member_id);
+    if (!prev || e.created_at > prev.created_at) latest.set(e.member_id, e);
+  }
+  return members.map((m) => {
+    const e = latest.get(m.id);
+    return { ...m, status: e?.status ?? 'unpaid', updatedAt: e?.created_at ?? null };
+  });
+}
+
+export function unpaidMembers(statuses: MemberStatus[]): MemberStatus[] {
+  return statuses.filter((s) => s.status === 'unpaid');
+}
+
+// Rule: the app only shows the list and text; staff send it via their own messenger.
+export function buildReminderText(unpaid: MemberStatus[], fee: FeeSetting | null): string | null {
+  if (unpaid.length === 0) return null;
+  const names = unpaid.map((m) => m.name || m.email).join(', ');
+  const feeLine = fee ? `회비 ${fee.amount.toLocaleString('ko-KR')}원, 납부 기한 ${fee.due_date}` : '회비 납부';
+  return `[동아리 회비 안내]\n${feeLine}\n아직 납부가 확인되지 않은 분: ${names}\n입금 후 운영진에게 알려주세요.`;
+}
+
+=== src/services/supabase.ts ===
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+
+function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing environment variable ${name}`);
+  return v;
+}
+
+// Uses the user's session cookie, so every query runs under RLS as that user.
+export function serverClient() {
+  const store = cookies();
+  return createServerClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'), {
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (list) => list.forEach(({ name, value, options }) => store.set(name, value, options)),
+    },
+  });
+}
+
+=== src/services/auth.ts ===
+import { serverClient } from './supabase';
+
+export class HttpError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+// Checked on the server for every request; RLS enforces the same rule in the database.
+export async function requireUser() {
+  const db = serverClient();
+  const { data, error } = await db.auth.getUser();
+  if (error || !data.user) throw new HttpError(401, '로그인이 필요합니다.');
+  const { data: profile, error: pErr } = await db.from('profiles').select('id, role').eq('id', data.user.id).single();
+  if (pErr || !profile) throw new HttpError(403, '회원 정보를 찾을 수 없습니다.');
+  return { db, userId: data.user.id, role: profile.role as 'member' | 'admin' };
+}
+
+export async function requireAdmin() {
+  const ctx = await requireUser();
+  if (ctx.role !== 'admin') throw new HttpError(403, '운영진만 사용할 수 있습니다.');
+  return ctx;
+}
+
+=== src/services/rateLimit.ts ===
+// In-memory fixed window per key. Per server instance only; Supabase Auth applies its own limits too.
+const hits = new Map<string, { count: number; reset: number }>();
+
+export function allow(key: string, limit = 5, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const h = hits.get(key);
+  if (!h || h.reset < now) { hits.set(key, { count: 1, reset: now + windowMs }); return true; }
+  h.count += 1;
+  return h.count <= limit;
+}
+
+=== src/services/http.ts ===
+import { NextResponse } from 'next/server';
+import { ValidationError } from '@/domain/dues';
+import { HttpError } from './auth';
+
+// Single place that turns failures into responses; unknown errors are logged.
+export async function handle(fn: () => Promise<unknown>) {
+  try {
+    return NextResponse.json(await fn());
+  } catch (e) {
+    if (e instanceof ValidationError) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
+    console.error(e);
+    return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
+  }
+}
+
+export async function readJson(req: Request): Promise<unknown> {
+  try { return await req.json(); } catch { throw new ValidationError('요청 형식이 올바르지 않습니다.'); }
+}
+
+=== src/services/dues.ts ===
+import { currentStatuses, type FeeSetting, type Member, type PaymentEntry } from '@/domain/dues';
+import type { serverClient } from './supabase';
+
+type Db = ReturnType<typeof serverClient>;
+
+export async function loadFee(db: Db): Promise<FeeSetting | null> {
+  const { data, error } = await db.from('fee_settings').select('amount, due_date')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function loadStatuses(db: Db) {
+  const [m, e] = await Promise.all([
+    db.from('profiles').select('id, email, name').order('name'),
+    db.from('payment_entries').select('member_id, status, created_at'),
+  ]);
+  if (m.error) throw m.error;
+  if (e.error) throw e.error;
+  return currentStatuses(m.data as Member[], e.data as PaymentEntry[]);
+}
+
+=== src/app/api/login/route.ts ===
+import { parseCredentials } from '@/domain/dues';
+import { allow } from '@/services/rateLimit';
+import { HttpError } from '@/services/auth';
+import { handle, readJson } from '@/services/http';
+import { serverClient } from '@/services/supabase';
+
+export async function POST(req: Request) {
+  return handle(async () => {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
+    if (!allow(`login:${ip}`)) throw new HttpError(429, '로그인 시도가 너무 많습니다. 1분 후 다시 시도하세요.');
+    const { email, password } = parseCredentials(await readJson(req));
+    const { error } = await serverClient().auth.signInWithPassword({ email, password });
+    if (error) throw new HttpError(401, '이메일 또는 비밀번호가 올바르지 않습니다.');
+    return { ok: true };
+  });
+}
+
+export async function DELETE() {
+  return handle(async () => {
+    const { error } = await serverClient().auth.signOut();
+    if (error) throw error;
+    return { ok: true };
+  });
+}
+
+=== src/app/api/dues/route.ts ===
+import { buildReminderText, unpaidMembers } from '@/domain/dues';
+import { requireUser } from '@/services/auth';
+import { handle } from '@/services/http';
+import { loadFee, loadStatuses } from '@/services/dues';
+
+// Admins get everyone (RLS lets them); members get only their own row.
+export async function GET() {
+  return handle(async () => {
+    const { db, role } = await requireUser();
+    const [fee, statuses] = await Promise.all([loadFee(db), loadStatuses(db)]);
+    const reminder = role === 'admin' ? buildReminderText(unpaidMembers(statuses), fee) : null;
+    return { role, fee, statuses, reminder };
+  });
+}
+
+=== src/app/api/fee/route.ts ===
+import { parseFeeSetting } from '@/domain/dues';
+import { requireAdmin } from '@/services/auth';
+import { handle, readJson } from '@/services/http';
+
+// A change appends a new row; the newest row is the setting for everyone.
+export async function POST(req: Request) {
+  return handle(async () => {
+    const { db, userId } = await requireAdmin();
+    const fee = parseFeeSetting(await readJson(req));
+    const { error } = await db.from('fee_settings').insert({ ...fee, changed_by: userId });
+    if (error) throw error;
+    return { ok: true };
+  });
+}
+
+=== src/app/api/payments/route.ts ===
+import { parsePaymentChange } from '@/domain/dues';
+import { HttpError, requireAdmin } from '@/services/auth';
+import { handle, readJson } from '@/services/http';
+
+// Never updates in place: each check/uncheck is a new entry with who and when.
+export async function POST(req: Request) {
+  return handle(async () => {
+    const { db, userId } = await requireAdmin();
+    const change = parsePaymentChange(await readJson(req));
+    const { data: member, error: mErr } = await db.from('profiles').select('id').eq('id', change.memberId).maybeSingle();
+    if (mErr) throw mErr;
+    if (!member) throw new HttpError(404, '회원을 찾을 수 없습니다.');
+    const { error } = await db.from('payment_entries').insert({
+      member_id: change.memberId, status: change.status, note: change.note, changed_by: userId,
+    });
+    if (error) throw error;
+    return { ok: true };
+  });
+}
+
+=== src/ui/api.ts ===
+export async function call<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({ error: `요청 실패 (${res.status})` }));
+  if (!res.ok) throw new Error(json.error ?? `요청 실패 (${res.status})`);
+  return json as T;
+}
+
+export async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  // Fallback for older mobile browsers without the async Clipboard API.
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  const ok = document.execCommand('copy');
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('복사하지 못했습니다. 아래 텍스트를 길게 눌러 직접 복사하세요.');
+}
+
+=== src/ui/FeeForm.tsx ===
+'use client';
+import { useState } from 'react';
+import type { FeeSetting } from '@/domain/dues';
+import { call } from './api';
+
+export function FeeForm({ fee, onSaved }: { fee: FeeSetting | null; onSaved: () => void }) {
+  const [amount, setAmount] = useState(fee ? String(fee.amount) : '');
+  const [due, setDue] = useState(fee?.due_date ?? '');
+  const [msg, setMsg] = useState('');
+  async function save() {
+    setMsg('');
+    try {
+      await call('/api/fee', 'POST', { amount: Number(amount), due_date: due });
+      setMsg('전체 회원에게 적용했습니다.');
+      onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+  }
+  return (
+    <section>
+      <h2>회비 일괄 설정</h2>
+      <input inputMode="numeric" placeholder="금액(원)" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+      <button onClick={save}>저장</button>
+      {msg && <p role="status">{msg}</p>}
+    </section>
+  );
+}
+
+=== src/ui/StatusList.tsx ===
+'use client';
+import type { MemberStatus } from '@/domain/dues';
+
+export function StatusList({ rows, editable, onToggle }:
+  { rows: MemberStatus[]; editable: boolean; onToggle: (id: string, paid: boolean) => void }) {
+  return (
+    <section>
+      <h2>납부 현황</h2>
+      <ul>
+        {rows.map((r) => (
+          <li key={r.id}>
+            <label>
+              <input type="checkbox" checked={r.status === 'paid'} disabled={!editable}
+                onChange={(e) => onToggle(r.id, e.target.checked)} />
+              {r.name || r.email} — {r.status === 'paid' ? '납부' : '미납'}
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+=== src/ui/Reminder.tsx ===
+'use client';
+import { useState } from 'react';
+import { copyText } from './api';
+
+export function Reminder({ text }: { text: string | null }) {
+  const [msg, setMsg] = useState('');
+  if (!text) return <section><h2>미납자 알림</h2><p>미납자가 없습니다.</p></section>;
+  async function copy() {
+    try { await copyText(text!); setMsg('복사했습니다. 메신저에 붙여넣어 보내세요.'); }
+    catch (e) { setMsg((e as Error).message); }
+  }
+  return (
+    <section>
+      <h2>미납자 알림</h2>
+      <textarea readOnly value={text} rows={6} style={{ width: '100%' }} />
+      <button onClick={copy}>복사</button>
+      {msg && <p role="status">{msg}</p>}
+    </section>
+  );
+}
+
+=== src/app/layout.tsx ===
+export const metadata = { title: '동아리 회비' };
+export const viewport = { width: 'device-width', initialScale: 1 };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko">
+      <body style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'system-ui' }}>{children}</body>
+    </html>
+  );
+}
+
+=== src/app/login/page.tsx ===
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { call } from '@/ui/api';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    try { await call('/api/login', 'POST', { email, password }); router.replace('/'); }
+    catch (err) { setError((err as Error).message); }
+  }
+  return (
+    <form onSubmit={submit}>
+      <h1>로그인</h1>
+      <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" />
+      <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호" />
+      <button type="submit">로그인</button>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
+}
+
+=== src/app/page.tsx ===
+'use client';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import type { FeeSetting, MemberStatus } from '@/domain/dues';
+import { call } from '@/ui/api';
+import { FeeForm } from '@/ui/FeeForm';
+import { StatusList } from '@/ui/StatusList';
+import { Reminder } from '@/ui/Reminder';
+
+type Data = { role: 'admin' | 'member'; fee: FeeSetting | null; statuses: MemberStatus[]; reminder: string | null };
+
+export default function Home() {
+  const router = useRouter();
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try { setData(await call<Data>('/api/dues')); setError(''); }
+    catch (e) {
+      const m = (e as Error).message;
+      if (m.includes('로그인')) router.replace('/login'); else setError(m);
+    }
+  }, [router]);
+  useEffect(() => { load(); }, [load]);
+
+  async function toggle(memberId: string, paid: boolean) {
+    try { await call('/api/payments', 'POST', { memberId, status: paid ? 'paid' : 'unpaid' }); await load(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function logout() {
+    try { await call('/api/login', 'DELETE'); router.replace('/login'); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  if (error) return <p role="alert">{error}</p>;
+  if (!data) return <p>불러오는 중…</p>;
+  const admin = data.role === 'admin';
+  return (
+    <main>
+      <h1>동아리 회비</h1>
+      <p>{data.fee ? `회비 ${data.fee.amount.toLocaleString('ko-KR')}원 · 기한 ${data.fee.due_date}` : '회비가 아직 설정되지 않았습니다.'}</p>
+      {admin && <FeeForm fee={data.fee} onSaved={load} />}
+      <StatusList rows={data.statuses} editable={admin} onToggle={toggle} />
+      {admin && <Reminder text={data.reminder} />}
+      <button onClick={logout}>로그아웃</button>
+    </main>
+  );
+}
+
+=== tsconfig.json ===
+{
+  "compilerOptions": {
+    "target": "ES2020", "lib": ["dom", "dom.iterable", "esnext"], "strict": true, "noEmit": true,
+    "module": "esnext", "moduleResolution": "bundler", "jsx": "preserve", "esModuleInterop": true,
+    "skipLibCheck": true, "resolveJsonModule": true, "isolatedModules": true, "incremental": true,
+    "plugins": [{ "name": "next" }], "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}
+
+=== docs/decisions.md ===
+# Decisions
+
+1. **Payment status is an append-only entry log; current status = newest entry per member (no entry = unpaid).**
+   Reason: money-related data must never be overwritten; the entries themselves are the audit log (who = changed_by, when = created_at).
+   Rejected: a `paid` boolean on the member row plus a separate audit table (two places holding the same fact).
+
+2. **Fee settings are also append-only; the newest row applies to all members.**
+   Reason: one amount/deadline for everyone (domain rule), with history of who changed it.
+   Rejected: a single mutable settings row.
+
+3. **One fee period only; changing the amount or deadline does not reset payment statuses.**
+   Reason: the goal and build plan do not mention multiple periods/semesters. Open question for the owner if periods are needed.
+   Rejected: tying payment entries to a setting id (would reset everyone on every correction).
+
+4. **Authentication is delegated to Supabase Auth (bcrypt-hashed passwords); members are added from the Supabase dashboard, admins are promoted by setting `profiles.role = 'admin'`.**
+   Reason: the plan asks only for login, not self sign-up or member management screens.
+   Rejected: a self sign-up page (not in the goal).
+
+5. **Authorization is checked twice: in each API route (`requireUser`/`requireAdmin`) and by RLS policies.**
+   Reason: never rely on hidden buttons; RLS also blocks direct calls with the public anon key.
+
+6. **Login rate limit is in-memory per server instance (5 attempts/min/IP).**
+   Reason: zero-cost; Supabase Auth adds its own server-side limit. Limitation: not shared across Vercel instances.
+   Rejected: Redis/Upstash (extra service).
+
+7. **Reminder text is generated on the server from derived unpaid list and only copied, never sent.**
+   Reason: domain rule — staff send it via their own messenger. Empty unpaid list returns no text and the UI says so.

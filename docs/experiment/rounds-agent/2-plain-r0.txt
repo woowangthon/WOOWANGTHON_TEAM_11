@@ -1,0 +1,424 @@
+=== package.json ===
+{
+  "name": "study-attendance",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+
+=== server.js ===
+import express from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_FILE = path.join(__dirname, "data.json");
+const PORT = process.env.PORT || 3000;
+
+const DEFAULT_DATA = {
+  settings: { lateFine: 1000, absentFine: 3000 },
+  members: [],   // { id, name }
+  sessions: [],  // { id, date, title, records: { [memberId]: "present" | "late" | "absent" } }
+  payments: [],  // { id, memberId, amount, date }
+};
+
+function load() {
+  try {
+    return { ...DEFAULT_DATA, ...JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) };
+  } catch {
+    return structuredClone(DEFAULT_DATA);
+  }
+}
+
+function save(data) {
+  const tmp = DATA_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, DATA_FILE);
+}
+
+const id = () => crypto.randomUUID();
+const STATUSES = ["present", "late", "absent"];
+
+function summary(data) {
+  const { lateFine, absentFine } = data.settings;
+  return data.members.map((m) => {
+    let present = 0, late = 0, absent = 0;
+    for (const s of data.sessions) {
+      const st = s.records[m.id];
+      if (st === "present") present++;
+      else if (st === "late") late++;
+      else if (st === "absent") absent++;
+    }
+    const fine = late * lateFine + absent * absentFine;
+    const paid = data.payments
+      .filter((p) => p.memberId === m.id)
+      .reduce((sum, p) => sum + p.amount, 0);
+    return { memberId: m.id, name: m.name, present, late, absent, fine, paid, due: fine - paid };
+  });
+}
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/api/state", (req, res) => {
+  const data = load();
+  res.json({ ...data, summary: summary(data) });
+});
+
+app.put("/api/settings", (req, res) => {
+  const lateFine = Number(req.body.lateFine);
+  const absentFine = Number(req.body.absentFine);
+  if (![lateFine, absentFine].every((n) => Number.isInteger(n) && n >= 0)) {
+    return res.status(400).json({ error: "벌금은 0 이상의 정수여야 합니다." });
+  }
+  const data = load();
+  data.settings = { lateFine, absentFine };
+  save(data);
+  res.json(data.settings);
+});
+
+app.post("/api/members", (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name || name.length > 30) return res.status(400).json({ error: "이름은 1~30자로 입력하세요." });
+  const data = load();
+  if (data.members.some((m) => m.name === name)) {
+    return res.status(409).json({ error: "이미 있는 이름입니다." });
+  }
+  const member = { id: id(), name };
+  data.members.push(member);
+  save(data);
+  res.status(201).json(member);
+});
+
+app.delete("/api/members/:id", (req, res) => {
+  const data = load();
+  data.members = data.members.filter((m) => m.id !== req.params.id);
+  for (const s of data.sessions) delete s.records[req.params.id];
+  data.payments = data.payments.filter((p) => p.memberId !== req.params.id);
+  save(data);
+  res.status(204).end();
+});
+
+app.post("/api/sessions", (req, res) => {
+  const date = String(req.body.date || "");
+  const title = String(req.body.title || "").trim().slice(0, 50);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "날짜 형식이 올바르지 않습니다." });
+  const data = load();
+  const records = {};
+  for (const m of data.members) records[m.id] = "present";
+  const session = { id: id(), date, title, records };
+  data.sessions.push(session);
+  data.sessions.sort((a, b) => b.date.localeCompare(a.date));
+  save(data);
+  res.status(201).json(session);
+});
+
+app.put("/api/sessions/:id/records/:memberId", (req, res) => {
+  const { status } = req.body;
+  if (!STATUSES.includes(status)) return res.status(400).json({ error: "잘못된 출석 상태입니다." });
+  const data = load();
+  const session = data.sessions.find((s) => s.id === req.params.id);
+  if (!session) return res.status(404).json({ error: "모임을 찾을 수 없습니다." });
+  if (!data.members.some((m) => m.id === req.params.memberId)) {
+    return res.status(404).json({ error: "멤버를 찾을 수 없습니다." });
+  }
+  session.records[req.params.memberId] = status;
+  save(data);
+  res.json(session);
+});
+
+app.delete("/api/sessions/:id", (req, res) => {
+  const data = load();
+  data.sessions = data.sessions.filter((s) => s.id !== req.params.id);
+  save(data);
+  res.status(204).end();
+});
+
+app.post("/api/payments", (req, res) => {
+  const amount = Number(req.body.amount);
+  const memberId = String(req.body.memberId || "");
+  if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: "금액은 1 이상의 정수여야 합니다." });
+  const data = load();
+  if (!data.members.some((m) => m.id === memberId)) return res.status(404).json({ error: "멤버를 찾을 수 없습니다." });
+  const payment = { id: id(), memberId, amount, date: new Date().toISOString().slice(0, 10) };
+  data.payments.push(payment);
+  save(data);
+  res.status(201).json(payment);
+});
+
+app.delete("/api/payments/:id", (req, res) => {
+  const data = load();
+  data.payments = data.payments.filter((p) => p.id !== req.params.id);
+  save(data);
+  res.status(204).end();
+});
+
+app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>스터디 출석 · 벌금 정산</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header><h1>스터디 출석 · 벌금 정산</h1></header>
+  <main>
+    <section>
+      <h2>멤버</h2>
+      <form id="member-form" class="row">
+        <input name="name" placeholder="이름" maxlength="30" required />
+        <button>추가</button>
+      </form>
+      <ul id="members" class="chips"></ul>
+    </section>
+
+    <section>
+      <h2>벌금 규칙</h2>
+      <form id="settings-form" class="row">
+        <label>지각 <input name="lateFine" type="number" min="0" step="100" />원</label>
+        <label>결석 <input name="absentFine" type="number" min="0" step="100" />원</label>
+        <button>저장</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>모임 출석</h2>
+      <form id="session-form" class="row">
+        <input name="date" type="date" required />
+        <input name="title" placeholder="주제 (선택)" maxlength="50" />
+        <button>모임 추가</button>
+      </form>
+      <div id="sessions"></div>
+    </section>
+
+    <section>
+      <h2>정산</h2>
+      <table>
+        <thead>
+          <tr><th>이름</th><th>출석</th><th>지각</th><th>결석</th><th>벌금</th><th>납부</th><th>미납</th><th></th></tr>
+        </thead>
+        <tbody id="summary"></tbody>
+        <tfoot id="summary-total"></tfoot>
+      </table>
+      <h3>납부 내역</h3>
+      <ul id="payments" class="list"></ul>
+    </section>
+  </main>
+  <p id="error" role="alert"></p>
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/style.css ===
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #222; }
+header { background: #2d4a7a; color: #fff; padding: 16px; }
+header h1 { margin: 0; font-size: 20px; }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+h2 { margin: 0 0 12px; font-size: 17px; }
+h3 { font-size: 15px; margin: 16px 0 8px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+input[type=number] { width: 90px; }
+button { padding: 6px 12px; border: 0; border-radius: 4px; background: #2d4a7a; color: #fff; cursor: pointer; }
+button.ghost { background: transparent; color: #a33; padding: 2px 6px; }
+.chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chips li { background: #eef2f8; border-radius: 16px; padding: 4px 4px 4px 12px; }
+.session { border-top: 1px solid #eee; padding: 12px 0; }
+.session-head { display: flex; justify-content: space-between; align-items: center; }
+.records { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-top: 8px; }
+.record { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+select.present { background: #e7f6ec; } select.late { background: #fff4d6; } select.absent { background: #fde4e4; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px; border-bottom: 1px solid #eee; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+td.due { font-weight: 600; color: #a33; }
+td.done { color: #2a7a3a; }
+.list { padding-left: 18px; }
+#error { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); background: #a33; color: #fff; padding: 8px 14px; border-radius: 6px; display: none; }
+#error.show { display: block; }
+@media (max-width: 600px) { th, td { padding: 4px; font-size: 13px; } }
+
+=== public/app.js ===
+const STATUS_LABEL = { present: "출석", late: "지각", absent: "결석" };
+const won = (n) => n.toLocaleString("ko-KR") + "원";
+let state = null;
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "요청에 실패했습니다.");
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function showError(msg) {
+  const el = document.getElementById("error");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+async function run(fn) {
+  try { await fn(); await refresh(); } catch (e) { showError(e.message); }
+}
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k === "class") node.className = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+const memberName = (id) => state.members.find((m) => m.id === id)?.name ?? "(삭제됨)";
+
+function renderMembers() {
+  const ul = document.getElementById("members");
+  ul.replaceChildren(...state.members.map((m) =>
+    el("li", {}, m.name, el("button", {
+      class: "ghost", title: "삭제",
+      onclick: () => confirm(`${m.name} 님을 삭제할까요? 출석·납부 기록도 함께 지워집니다.`)
+        && run(() => api("DELETE", `/api/members/${m.id}`)),
+    }, "×"))
+  ));
+}
+
+function renderSettings() {
+  const f = document.getElementById("settings-form");
+  f.lateFine.value = state.settings.lateFine;
+  f.absentFine.value = state.settings.absentFine;
+}
+
+function renderSessions() {
+  const box = document.getElementById("sessions");
+  if (!state.sessions.length) { box.replaceChildren(el("p", {}, "아직 모임이 없습니다.")); return; }
+  box.replaceChildren(...state.sessions.map((s) => {
+    const records = state.members.map((m) => {
+      const status = s.records[m.id];
+      const select = el("select", {
+        class: status || "",
+        onchange: (e) => run(() => api("PUT", `/api/sessions/${s.id}/records/${m.id}`, { status: e.target.value })),
+      });
+      if (!status) select.append(el("option", { value: "", disabled: "", selected: "" }, "미기록"));
+      for (const [value, label] of Object.entries(STATUS_LABEL)) {
+        const opt = el("option", { value }, label);
+        if (value === status) opt.selected = true;
+        select.append(opt);
+      }
+      return el("div", { class: "record" }, m.name, select);
+    });
+    return el("div", { class: "session" },
+      el("div", { class: "session-head" },
+        el("strong", {}, `${s.date}${s.title ? " · " + s.title : ""}`),
+        el("button", {
+          class: "ghost",
+          onclick: () => confirm("이 모임을 삭제할까요?") && run(() => api("DELETE", `/api/sessions/${s.id}`)),
+        }, "삭제")),
+      el("div", { class: "records" }, ...records));
+  }));
+}
+
+function renderSummary() {
+  const tbody = document.getElementById("summary");
+  tbody.replaceChildren(...state.summary.map((r) => {
+    const payBtn = r.due > 0
+      ? el("button", {
+          onclick: () => {
+            const input = prompt(`${r.name} 님 납부 금액`, r.due);
+            if (input === null) return;
+            run(() => api("POST", "/api/payments", { memberId: r.memberId, amount: Number(input) }));
+          },
+        }, "납부")
+      : "";
+    return el("tr", {},
+      el("td", {}, r.name),
+      el("td", {}, String(r.present)),
+      el("td", {}, String(r.late)),
+      el("td", {}, String(r.absent)),
+      el("td", {}, won(r.fine)),
+      el("td", {}, won(r.paid)),
+      el("td", { class: r.due > 0 ? "due" : "done" }, r.due > 0 ? won(r.due) : r.due < 0 ? `초과 ${won(-r.due)}` : "완납"),
+      el("td", {}, payBtn));
+  }));
+  const sum = (k) => state.summary.reduce((a, r) => a + r[k], 0);
+  document.getElementById("summary-total").replaceChildren(
+    el("tr", {},
+      el("th", {}, "합계"), el("th", {}), el("th", {}), el("th", {}),
+      el("th", {}, won(sum("fine"))), el("th", {}, won(sum("paid"))),
+      el("th", {}, won(Math.max(0, sum("due")))), el("th", {})));
+
+  const ul = document.getElementById("payments");
+  const payments = [...state.payments].reverse();
+  if (!payments.length) { ul.replaceChildren(el("li", {}, "납부 내역이 없습니다.")); return; }
+  ul.replaceChildren(...payments.map((p) =>
+    el("li", {}, `${p.date} · ${memberName(p.memberId)} · ${won(p.amount)} `,
+      el("button", {
+        class: "ghost",
+        onclick: () => confirm("납부 기록을 취소할까요?") && run(() => api("DELETE", `/api/payments/${p.id}`)),
+      }, "취소"))));
+}
+
+async function refresh() {
+  state = await api("GET", "/api/state");
+  renderMembers();
+  renderSettings();
+  renderSessions();
+  renderSummary();
+}
+
+document.getElementById("member-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => { await api("POST", "/api/members", { name: f.name.value }); f.reset(); });
+});
+
+document.getElementById("settings-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(() => api("PUT", "/api/settings", { lateFine: Number(f.lateFine.value), absentFine: Number(f.absentFine.value) }));
+});
+
+document.getElementById("session-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => { await api("POST", "/api/sessions", { date: f.date.value, title: f.title.value }); f.title.value = ""; });
+});
+
+document.getElementById("session-form").date.valueAsDate = new Date();
+refresh().catch((e) => showError(e.message));
+
+=== README.md ===
+# 스터디 출석 · 벌금 정산
+
+```
+npm install
+npm start   # http://localhost:3000
+```
+
+- 멤버 추가/삭제, 모임(날짜) 추가 후 멤버별 출석/지각/결석 기록
+- 지각·결석 벌금 금액 설정, 멤버별 벌금 합계·납부·미납 자동 계산
+- 납부 기록 추가/취소
+- 데이터는 `data.json`에 저장됩니다 (인증 없음, 소규모 모임 내부용)

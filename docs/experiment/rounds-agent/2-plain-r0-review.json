@@ -1,0 +1,91 @@
+{
+  "findings": [
+    {
+      "ruleId": "eng-structure",
+      "verdict": "violation",
+      "evidence": "server.js",
+      "fix": "비즈니스 규칙(벌금 계산 등)과 서버 라우팅 로직을 별도의 모듈로 분리하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-file-size",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-duplication",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-silent-failure",
+      "verdict": "violation",
+      "evidence": "server.js: load()",
+      "fix": "catch 블록에서 에러를 무시하지 말고 로그를 남기거나 처리하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-decisions-log",
+      "verdict": "violation",
+      "evidence": "docs/decisions.md",
+      "fix": "docs/decisions.md 파일을 생성하고 주요 설계 결정을 기록하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-single-source",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-money-integrity",
+      "verdict": "violation",
+      "evidence": "server.js: app.post(\"/api/payments\")",
+      "fix": "납부 금액을 직접 수정하거나 덮어쓰지 말고, 변경 이력을 장부 형태로 기록하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-secrets",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-input-validation",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-authz",
+      "verdict": "violation",
+      "evidence": "server.js",
+      "fix": "서버 요청마다 로그인된 사용자의 권한을 확인하는 로직을 추가하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-db-access",
+      "verdict": "violation",
+      "evidence": "server.js: data.json",
+      "fix": "JSON 파일 직접 접근 대신 적절한 데이터베이스 및 파라미터화된 쿼리를 사용하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-rate-limit",
+      "verdict": "violation",
+      "evidence": "server.js",
+      "fix": "로그인 및 주요 엔드포인트에 rate limiting 미들웨어를 추가하세요.",
+      "by": "ai"
+    }
+  ],
+  "source": "ai",
+  "model": "gemini-flash-lite-latest",
+  "error": null
+}

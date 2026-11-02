@@ -1,0 +1,495 @@
+=== package.json ===
+{
+  "name": "club-dues",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.13"
+  }
+}
+
+=== .env.example ===
+PORT=3000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-account@gmail.com
+SMTP_PASS=your-app-password
+MAIL_FROM="동아리 총무 <your-account@gmail.com>"
+
+=== README.md ===
+# 동아리 회비 관리 앱
+
+회원별 회비 납부 여부를 관리하고, 미납자에게 이메일 알림을 보냅니다.
+
+## 실행
+```
+npm install
+cp .env.example .env   # SMTP 정보 입력
+node --env-file=.env server.js
+```
+브라우저에서 http://localhost:3000 접속.
+
+## 기능
+- 회원 추가/삭제 (이름, 이메일)
+- 납부 기간(예: 2026-11) 생성, 회비 금액 설정
+- 기간별 회원 납부 여부 체크
+- 미납자 전체 또는 개별 알림 메일 발송
+- 데이터는 `data.json` 파일에 저장
+
+SMTP 설정이 없으면 메일을 실제로 보내지 않고 서버 콘솔에 내용을 출력합니다.
+
+=== db.js ===
+import fs from 'node:fs';
+import path from 'node:path';
+
+const FILE = path.resolve('data.json');
+
+const empty = () => ({ members: [], periods: [], payments: {}, notifications: [], nextId: 1 });
+
+let state = load();
+
+function load() {
+  try {
+    return { ...empty(), ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
+  } catch {
+    return empty();
+  }
+}
+
+function save() {
+  const tmp = FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, FILE);
+}
+
+export function getState() {
+  return state;
+}
+
+export function addMember(name, email) {
+  const m = { id: state.nextId++, name, email };
+  state.members.push(m);
+  save();
+  return m;
+}
+
+export function removeMember(id) {
+  state.members = state.members.filter((m) => m.id !== id);
+  for (const key of Object.keys(state.payments)) {
+    if (key.endsWith(`:${id}`)) delete state.payments[key];
+  }
+  save();
+}
+
+export function addPeriod(name, amount, dueDate) {
+  if (state.periods.some((p) => p.name === name)) throw new Error('이미 있는 기간입니다');
+  const p = { name, amount, dueDate };
+  state.periods.push(p);
+  save();
+  return p;
+}
+
+export function setPaid(period, memberId, paid) {
+  const key = `${period}:${memberId}`;
+  if (paid) state.payments[key] = { paidAt: new Date().toISOString() };
+  else delete state.payments[key];
+  save();
+}
+
+export function isPaid(period, memberId) {
+  return Boolean(state.payments[`${period}:${memberId}`]);
+}
+
+export function unpaidMembers(period) {
+  return state.members.filter((m) => !isPaid(period, m.id));
+}
+
+export function logNotification(entry) {
+  state.notifications.unshift(entry);
+  state.notifications = state.notifications.slice(0, 200);
+  save();
+}
+
+=== mailer.js ===
+import nodemailer from 'nodemailer';
+
+const configured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
+
+const transport = configured
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  : null;
+
+export async function sendReminder(member, period) {
+  const subject = `[회비 안내] ${period.name} 회비 납부 요청`;
+  const text = [
+    `${member.name}님, 안녕하세요.`,
+    ``,
+    `${period.name} 동아리 회비 ${period.amount.toLocaleString()}원이 아직 확인되지 않았습니다.`,
+    period.dueDate ? `납부 기한: ${period.dueDate}` : '',
+    ``,
+    `이미 납부하셨다면 총무에게 알려주세요. 감사합니다.`,
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+
+  if (!transport) {
+    console.log(`[메일 미설정 - 콘솔 출력]\nTo: ${member.email}\nSubject: ${subject}\n${text}\n`);
+    return { simulated: true };
+  }
+  await transport.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to: member.email,
+    subject,
+    text,
+  });
+  return { simulated: false };
+}
+
+=== server.js ===
+import express from 'express';
+import * as db from './db.js';
+import { sendReminder } from './mailer.js';
+
+const app = express();
+app.use(express.json());
+app.use(express.static('public'));
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// 고정 윈도우 방식의 간단한 메모리 기반 요청 횟수 제한 (IP 기준)
+function rateLimit({ windowMs, max }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, v] of hits) if (now - v.start >= windowMs) hits.delete(key);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || now - entry.start >= windowMs) {
+      entry = { start: now, count: 0 };
+      hits.set(key, entry);
+    }
+    entry.count++;
+    if (entry.count > max) {
+      res.set('Retry-After', String(Math.ceil((entry.start + windowMs - now) / 1000)));
+      return res.status(429).json({ error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요' });
+    }
+    next();
+  };
+}
+
+// 외부 API(SMTP 메일 발송)를 호출하는 엔드포인트용: 10분에 5회
+const remindLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5 });
+
+app.get('/api/state', (req, res) => {
+  const s = db.getState();
+  res.json({
+    members: s.members,
+    periods: s.periods,
+    payments: s.payments,
+    notifications: s.notifications.slice(0, 30),
+  });
+});
+
+app.post('/api/members', (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const email = String(req.body.email || '').trim();
+  if (!name || !EMAIL_RE.test(email)) return res.status(400).json({ error: '이름과 올바른 이메일을 입력하세요' });
+  res.json(db.addMember(name, email));
+});
+
+app.delete('/api/members/:id', (req, res) => {
+  db.removeMember(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.post('/api/periods', (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const amount = Number(req.body.amount);
+  const dueDate = String(req.body.dueDate || '');
+  if (!name || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: '기간 이름과 금액을 입력하세요' });
+  }
+  try {
+    res.json(db.addPeriod(name, amount, dueDate));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/payments', (req, res) => {
+  const { period, memberId, paid } = req.body;
+  if (!db.getState().periods.some((p) => p.name === period)) return res.status(404).json({ error: '기간 없음' });
+  db.setPaid(period, Number(memberId), Boolean(paid));
+  res.json({ ok: true });
+});
+
+app.post('/api/remind', remindLimiter, async (req, res) => {
+  const { period: periodName, memberIds } = req.body;
+  const period = db.getState().periods.find((p) => p.name === periodName);
+  if (!period) return res.status(404).json({ error: '기간 없음' });
+
+  let targets = db.unpaidMembers(period.name);
+  if (Array.isArray(memberIds) && memberIds.length) {
+    const ids = new Set(memberIds.map(Number));
+    targets = targets.filter((m) => ids.has(m.id));
+  }
+
+  const results = [];
+  for (const m of targets) {
+    try {
+      const r = await sendReminder(m, period);
+      results.push({ memberId: m.id, name: m.name, ok: true, simulated: r.simulated });
+    } catch (e) {
+      results.push({ memberId: m.id, name: m.name, ok: false, error: e.message });
+    }
+  }
+  const sent = results.filter((r) => r.ok).length;
+  db.logNotification({ at: new Date().toISOString(), period: period.name, sent, failed: results.length - sent });
+  res.json({ results });
+});
+
+const port = Number(process.env.PORT || 3000);
+app.listen(port, () => console.log(`회비 관리 앱: http://localhost:${port}`));
+
+=== docs/decisions.md ===
+# 설계 결정 기록
+
+되돌리기 어려운 설계 결정과 그 이유를 기록합니다. 결정이 바뀌면 기존 항목을 지우지 말고 새 항목을 추가하세요.
+
+## D1. 데이터 저장: 단일 JSON 파일 (`data.json`)
+- 결정: DB 없이 서버 프로세스 메모리 + JSON 파일에 저장 (임시 파일 쓰기 후 rename)
+- 이유: 동아리 규모(수십~수백 명)에서 설치·운영 부담이 가장 적음
+- 대가: 서버 인스턴스 1개만 가능, 동시 쓰기·대규모 데이터에 부적합. 나중에 DB로 옮기려면 마이그레이션 스크립트 필요
+
+## D2. 납부 기록 키: `기간이름:회원ID`
+- 결정: 납부 기간은 이름(예: `2026-11`)을 식별자로 사용하고, 납부 기록은 `기간:회원ID` 키로 저장
+- 이유: 구조가 단순하고 화면에서 바로 읽힘
+- 대가: 기간 이름을 바꾸면 기존 납부 기록과 연결이 끊김. 기간 이름 변경 기능은 제공하지 않음
+
+## D3. 회원 삭제 시 납부 기록도 삭제
+- 결정: 회원을 삭제하면 해당 회원의 모든 납부 기록을 함께 지움
+- 대가: 삭제 후 과거 납부 내역 복구 불가 (백업은 `data.json` 복사로 직접)
+
+## D4. 알림 채널: 이메일(SMTP)
+- 결정: 미납 알림은 nodemailer를 통한 이메일로만 발송. SMTP 미설정 시 서버 콘솔 출력으로 대체하고 화면에 그 사실을 표시
+- 이유: 별도 유료 서비스 없이 사용 가능
+- 대가: 카카오톡/문자 알림은 미지원. 추가하려면 `mailer.js`와 같은 형태의 발송 모듈을 새로 작성해야 함
+
+## D5. 인증 없음
+- 결정: 현재 로그인 기능이 없고, 앱은 총무 개인 PC나 내부망에서 실행한다고 가정
+- 대가: 외부에 공개 배포하면 누구나 회원 정보 조회·수정·알림 발송 가능. 공개 배포 전 인증 추가 필수
+
+## D6. 요청 횟수 제한: 메모리 기반, IP 기준
+- 결정: 외부 API(메일 발송)를 호출하는 `/api/remind`에 IP당 10분 5회 제한. 외부 패키지 없이 메모리에서 계산
+- 대가: 서버 재시작 시 카운트 초기화, 서버 여러 대로 늘리면 공유되지 않음. 리버스 프록시 뒤에 두면 `app.set('trust proxy', ...)` 설정이 필요
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>동아리 회비 관리</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>동아리 회비 관리</h1>
+
+    <section>
+      <h2>회원</h2>
+      <form id="member-form">
+        <input name="name" placeholder="이름" required />
+        <input name="email" type="email" placeholder="이메일" required />
+        <button>추가</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>납부 기간</h2>
+      <form id="period-form">
+        <input name="name" placeholder="예: 2026-11" required />
+        <input name="amount" type="number" min="1" placeholder="금액(원)" required />
+        <input name="dueDate" type="date" />
+        <button>생성</button>
+      </form>
+      <label>현재 기간
+        <select id="period-select"></select>
+      </label>
+      <p id="summary"></p>
+    </section>
+
+    <section>
+      <h2>납부 현황</h2>
+      <table>
+        <thead><tr><th>이름</th><th>이메일</th><th>납부</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <button id="remind-all">미납자 전체에게 알림 보내기</button>
+      <p id="status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>알림 기록</h2>
+      <ul id="log"></ul>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/style.css ===
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f6; color: #222; }
+main { max-width: 760px; margin: 0 auto; padding: 16px; }
+section { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+input, select, button { padding: 6px 10px; font-size: 14px; }
+button { cursor: pointer; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+tr.unpaid td:first-child { color: #c0392b; font-weight: 600; }
+#status { color: #555; }
+
+=== public/app.js ===
+let state = { members: [], periods: [], payments: {}, notifications: [] };
+let current = '';
+
+const $ = (id) => document.getElementById(id);
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '요청 실패');
+  return data;
+}
+
+async function refresh() {
+  state = await api('GET', '/api/state');
+  if (!state.periods.some((p) => p.name === current)) {
+    current = state.periods.at(-1)?.name || '';
+  }
+  render();
+}
+
+function el(tag, text) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function render() {
+  const sel = $('period-select');
+  sel.replaceChildren(...state.periods.map((p) => {
+    const o = el('option', `${p.name} (${p.amount.toLocaleString()}원)`);
+    o.value = p.name;
+    o.selected = p.name === current;
+    return o;
+  }));
+
+  const rows = $('rows');
+  rows.replaceChildren();
+  let paidCount = 0;
+  for (const m of state.members) {
+    const paid = Boolean(state.payments[`${current}:${m.id}`]);
+    if (paid) paidCount++;
+    const tr = el('tr');
+    if (!paid) tr.className = 'unpaid';
+    tr.append(el('td', m.name), el('td', m.email));
+
+    const tdPaid = el('td');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = paid;
+    cb.disabled = !current;
+    cb.onchange = async () => {
+      await api('PUT', '/api/payments', { period: current, memberId: m.id, paid: cb.checked });
+      refresh();
+    };
+    tdPaid.append(cb);
+
+    const tdAct = el('td');
+    if (!paid && current) {
+      const b = el('button', '알림');
+      b.onclick = () => remind([m.id]);
+      tdAct.append(b);
+    }
+    const del = el('button', '삭제');
+    del.onclick = async () => {
+      if (!confirm(`${m.name} 회원을 삭제할까요?`)) return;
+      await api('DELETE', `/api/members/${m.id}`);
+      refresh();
+    };
+    tdAct.append(del);
+    tr.append(tdPaid, tdAct);
+    rows.append(tr);
+  }
+
+  $('summary').textContent = current
+    ? `납부 ${paidCount}명 / 미납 ${state.members.length - paidCount}명`
+    : '납부 기간을 먼저 생성하세요.';
+  $('remind-all').disabled = !current || paidCount === state.members.length;
+
+  $('log').replaceChildren(...state.notifications.map((n) =>
+    el('li', `${new Date(n.at).toLocaleString()} · ${n.period} · 발송 ${n.sent}건${n.failed ? `, 실패 ${n.failed}건` : ''}`)));
+}
+
+async function remind(memberIds) {
+  $('status').textContent = '발송 중...';
+  try {
+    const { results } = await api('POST', '/api/remind', { period: current, memberIds });
+    const ok = results.filter((r) => r.ok);
+    const sim = ok.some((r) => r.simulated) ? ' (메일 미설정: 서버 콘솔에만 출력됨)' : '';
+    const fail = results.filter((r) => !r.ok).map((r) => r.name);
+    $('status').textContent = `${ok.length}명에게 알림 발송${sim}` + (fail.length ? ` / 실패: ${fail.join(', ')}` : '');
+  } catch (e) {
+    $('status').textContent = e.message;
+  }
+  refresh();
+}
+
+$('member-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api('POST', '/api/members', Object.fromEntries(f));
+    e.target.reset();
+    refresh();
+  } catch (err) { alert(err.message); }
+};
+
+$('period-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  try {
+    await api('POST', '/api/periods', f);
+    current = f.name;
+    e.target.reset();
+    refresh();
+  } catch (err) { alert(err.message); }
+};
+
+$('period-select').onchange = (e) => { current = e.target.value; render(); };
+$('remind-all').onclick = () => remind();
+
+refresh();
+
+변경 사항
+1. [결정 기록 남기기] docs/decisions.md 신규 생성: 저장 방식(JSON 파일), 납부 기록 키, 회원 삭제 시 기록 삭제, 이메일 알림, 인증 없음, 요청 제한 방식 등 되돌리기 어려운 결정 6건과 그 대가를 기록.
+2. [요청 횟수 제한] server.js에 의존성 없는 메모리 기반 rateLimit 미들웨어를 추가하고, 외부 API(SMTP 메일)를 호출하는 POST /api/remind에 IP당 10분 5회 제한을 적용(초과 시 429 + Retry-After). 이 앱에는 로그인 엔드포인트가 없어 그쪽은 적용 대상이 없음 (인증 추가 시 같은 미들웨어를 붙이면 됨).
