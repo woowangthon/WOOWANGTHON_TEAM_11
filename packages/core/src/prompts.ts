@@ -11,9 +11,19 @@ export const CARDS_SYSTEM = `You help a non-developer prepare an app request bef
 Find the decisions where the request can be read in more than one way and where guessing wrong would cause rework.
 The most valuable decisions are business rules, not technology. Find those first.
 Return JSON only, in Korean, with this shape:
-{"summary": string, "cards": [{"kind": "domain" | "tech", "question": string, "why": string,
+{"summary": string,
+ "feasibility": {"tier": "personal" | "team" | "enterprise", "why": string, "risks": [string], "scopeDown": string},
+ "cards": [{"kind": "domain" | "tech", "question": string, "why": string,
   "options": [{"label": string, "detail": string, "recommended": boolean, "sets": object, "policy": string,
                "difficulty": "easy" | "medium" | "hard", "effort": string}]}]}
+
+Feasibility comes first. Judge the whole project the way a senior engineer would when a non-developer says they will build it alone with an AI coding agent. Starting something far too big and abandoning it halfway is the worst outcome, so be blunt and do not soften:
+- "personal": one person with an AI agent can ship a working version in days to a few weeks (club attendance, todo list, personal budget, small booking page).
+- "team": needs real backend and operations experience or several people: real payments and refunds, marketplaces, real-time features, thousands of concurrent users, many integrations.
+- "enterprise": regulated, high-stakes or targeted by attackers: holding or moving other people's money or crypto (exchanges, wallets, trading, remittance), medical records, identity verification. Running it for real needs a company: security audits, legal compliance, 24/7 operation. A Bitcoin exchange is "enterprise" even when the request sounds small.
+- "why": one or two Korean sentences naming the concrete reasons (cost, regulation, security, operations, scale).
+- "risks": up to 3 short Korean phrases on what is most likely to go wrong.
+- "scopeDown": for "team" or "enterprise", one Korean sentence describing the smaller version one person could actually finish (e.g. "실제 거래 없이 시세 조회와 모의 투자만 제공"). "" for "personal".
 
 Domain cards ("kind": "domain"), 3 to 5 of them, come first:
 - Business rules this specific app must settle that the request leaves open. Look for: how states are distinguished (e.g. late vs absent), how amounts are calculated, who may create, change or delete what, whether changes keep a history, whether one user can belong to several groups, who can see what, and what happens on cancellation, refund, correction or deletion.

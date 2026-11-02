@@ -1,6 +1,7 @@
 import { isProfileKey, isProfileValue } from './profile.ts';
 import { DIFFICULTIES } from './types.ts';
-import type { Card, CardOption, Difficulty, Profile } from './types.ts';
+import type { Card, CardOption, CardsData, Difficulty, Profile } from './types.ts';
+import { parseFeasibility } from './feasibility.ts';
 
 export const MAX_CARDS = 9;
 const MAX_OPTIONS = 4;
@@ -102,7 +103,7 @@ function parseSets(raw: unknown, where: string): Partial<Profile> {
 }
 
 /** Turns untrusted model output into cards, or throws saying what was wrong. */
-export function parseCards(raw: unknown): { summary: string; cards: Card[] } {
+export function parseCards(raw: unknown): CardsData {
   if (typeof raw !== 'object' || raw === null) throw new Error('expected a JSON object');
   const obj = raw as Record<string, unknown>;
   if (!Array.isArray(obj.cards) || obj.cards.length === 0) throw new Error('cards: expected a non-empty array');
@@ -123,7 +124,11 @@ export function parseCards(raw: unknown): { summary: string; cards: Card[] } {
     }
   });
   if (cards.length === 0) throw new Error(errors[0] ?? 'no usable cards');
-  return { summary: typeof obj.summary === 'string' ? obj.summary.trim().slice(0, 200) : '', cards };
+  return {
+    summary: typeof obj.summary === 'string' ? obj.summary.trim().slice(0, 200) : '',
+    cards,
+    feasibility: parseFeasibility(obj.feasibility),
+  };
 }
 
 function parseCard(c: unknown, where: string, id: string): Card {

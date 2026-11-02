@@ -165,5 +165,30 @@ export interface Plan {
   skills: SkillPick[];
 }
 
+/** How big the whole project really is, for one person building it with an AI coding agent. */
+export const TIERS = ['personal', 'team', 'enterprise'] as const;
+export type Tier = (typeof TIERS)[number];
+
+export interface Feasibility {
+  tier: Tier;
+  /** Why it is that big, concretely (cost, regulation, security, operations). */
+  why: string;
+  /** What is most likely to go wrong. */
+  risks: string[];
+  /** The smaller version one person could actually finish; '' when already personal-sized. */
+  scopeDown: string;
+  /** Set when a rule raised the tier above the AI's; this reason is shown so the change is visible. */
+  raisedBy: string | null;
+  /** 'rule' when the AI gave no verdict and only the rule floor is known. */
+  by: 'ai' | 'rule';
+}
+
+/** What the cards step returns: the cards plus the verdict on the whole project. */
+export interface CardsData {
+  summary: string;
+  cards: Card[];
+  feasibility: Feasibility | null;
+}
+
 /** Where a piece of output came from. Shown in the UI: the contest forbids passing fixed output off as AI output. */
 export type Source = 'ai' | 'fallback';

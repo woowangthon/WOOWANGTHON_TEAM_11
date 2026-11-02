@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deriveProfile, recommendRules, recommendedAnswers, toDecisions, toDomainRules, translatableTexts } from '@spec/core';
-import type { Answers, Card, CustomAnswers, Generated, Plan, SpecInput } from '@spec/core';
+import type { Answers, Card, CardsData, CustomAnswers, Generated, Plan, SpecInput } from '@spec/core';
 import { fetchCards, fetchTasks, fetchTranslate } from './api.ts';
 import type { TranslateResult } from './api.ts';
 import { applyTheme, loadScheme, saveScheme } from './theme.ts';
@@ -29,7 +29,7 @@ export function App() {
   const [scheme, setScheme] = useState<Scheme>(loadScheme);
   const [step, setStep] = useState<Step>('request');
   const [request, setRequest] = useState('');
-  const [cardsResult, setCardsResult] = useState<Generated<{ summary: string; cards: Card[] }> | null>(null);
+  const [cardsResult, setCardsResult] = useState<Generated<CardsData> | null>(null);
   const [answers, setAnswers] = useState<Answers>({});
   const [custom, setCustom] = useState<CustomAnswers>({});
   const [notes, setNotes] = useState('');

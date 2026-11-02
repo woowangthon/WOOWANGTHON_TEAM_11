@@ -13,3 +13,4 @@ export * from './skills.ts';
 export * from './providers.ts';
 export * from './securityChecks.ts';
 export * from './board.ts';
+export * from './feasibility.ts';
