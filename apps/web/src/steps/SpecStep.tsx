@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ArrowRight, Copy, Download, FileText, Gauge, Languages, ShieldAlert, Wallet } from 'lucide-react';
 import { buildSpec, estimateTokens, securityChecksFor, withTexts } from '@spec/core';
-import type { Card, Generated, Plan, Profile, SpecInput, SpecLang } from '@spec/core';
+import type { Card, CardsData, Generated, Plan, Profile, SpecInput, SpecLang } from '@spec/core';
 import type { TranslateResult } from '../api.ts';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
 import { PlanView } from '../ui/PlanView.tsx';
@@ -15,7 +15,7 @@ interface Props {
   input: SpecInput;
   /** English versions of translatableTexts(input), or the Korean ones back on failure. */
   translation: TranslateResult;
-  cardsResult: Generated<{ summary: string; cards: Card[] }>;
+  cardsResult: Generated<CardsData>;
   tasksResult: Generated<Plan>;
   profile: Profile;
   onBack: () => void;

@@ -1,11 +1,12 @@
 import { ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
 import { CUSTOM_ANSWER, MAX_CUSTOM_ANSWER_CHARS, MAX_NOTES_CHARS } from '@spec/core';
-import type { Answers, Card, CardKind, CustomAnswers, Generated } from '@spec/core';
+import type { Answers, Card, CardKind, CardsData, CustomAnswers, Generated } from '@spec/core';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
 import { Dots } from '../ui/PlanView.tsx';
+import { FeasibilityPanel } from '../ui/FeasibilityPanel.tsx';
 
 interface Props {
-  result: Generated<{ summary: string; cards: Card[] }>;
+  result: Generated<CardsData>;
   answers: Answers;
   custom: CustomAnswers;
   notes: string;
@@ -22,10 +23,11 @@ const GROUPS: { kind: CardKind; title: string; blurb: string; icon: typeof Scale
 ];
 
 export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, onNotes, onBack, onNext }: Props) {
-  const { summary, cards } = result.data;
+  const { summary, cards, feasibility } = result.data;
   const policyOf = (card: Card) => card.options.find((o) => o.id === answers[card.id])?.policy ?? '';
   return (
     <>
+      {feasibility && <FeasibilityPanel f={feasibility} />}
       <section className="Panel">
         <div className="Row">
           <h2 className="SectionTitle">해석이 갈리는 지점 {cards.length}개</h2>

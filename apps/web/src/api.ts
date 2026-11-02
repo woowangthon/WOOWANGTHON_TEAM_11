@@ -1,4 +1,4 @@
-import type { Card, Decision, Finding, Generated, Plan, Profile, Source } from '@spec/core';
+import type { CardsData, Decision, Finding, Generated, Plan, Profile, Source } from '@spec/core';
 import { credentialHeaders } from './credentials.ts';
 
 export interface ReviewResult {
@@ -20,7 +20,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const fetchCards = (request: string) =>
-  post<Generated<{ summary: string; cards: Card[] }>>('/api/cards', { request });
+  post<Generated<CardsData>>('/api/cards', { request });
 
 export const fetchReview = (code: string, ruleIds: string[]) => post<ReviewResult>('/api/review', { code, ruleIds });
 
