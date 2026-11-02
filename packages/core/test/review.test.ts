@@ -28,6 +28,11 @@ test('parseFindings rejects a rule id that was not sent', () => {
   assert.throws(() => parseFindings({ findings: [{ ruleId: 'made-up', verdict: 'ok' }] }, new Set(['sec-secrets'])), /unknown rule/);
 });
 
+test('an entry with no rule id is dropped without losing the rest', () => {
+  const raw = { findings: [{ ruleId: 'sec-secrets', verdict: 'violation' }, { ruleId: '', verdict: 'ok' }, { verdict: 'ok' }] };
+  assert.deepEqual(parseFindings(raw, new Set(['sec-secrets'])).map((f) => f.ruleId), ['sec-secrets']);
+});
+
 test('a rule-found violation is not overridden by the model saying ok', () => {
   const rule: Finding = { ruleId: 'sec-secrets', verdict: 'violation', evidence: 'k', fix: 'f', by: 'rule' };
   const ai: Finding = { ruleId: 'sec-secrets', verdict: 'ok', evidence: '', fix: '', by: 'ai' };
