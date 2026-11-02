@@ -71,7 +71,10 @@ export function parseFindings(raw: unknown, ruleIds: Set<string>): Finding[] {
   const out: Finding[] = [];
   for (const [i, f] of list.entries()) {
     const item = f as Record<string, unknown>;
-    const ruleId = String(item?.ruleId ?? '');
+    const ruleId = String(item?.ruleId ?? '').trim();
+    // An entry with no id points at no rule, so dropping it hides nothing; Flash adds one now and then
+    // and it used to throw away nine good findings with it.
+    if (!ruleId) continue;
     // An id we did not send cannot be shown against a rule; reject the whole answer rather than drop it quietly.
     if (!ruleIds.has(ruleId)) throw new Error(`findings[${i}]: unknown rule "${ruleId}"`);
     if (seen.has(ruleId)) continue;
