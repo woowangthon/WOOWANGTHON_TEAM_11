@@ -1,0 +1,91 @@
+{
+  "findings": [
+    {
+      "ruleId": "eng-structure",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-file-size",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-duplication",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-silent-failure",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-decisions-log",
+      "verdict": "violation",
+      "evidence": "",
+      "fix": "비가역적 설계 결정을 기록하기 위해 docs/decisions.md 파일을 생성하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-single-source",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-money-integrity",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-secrets",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-input-validation",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-password",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-authz",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-rate-limit",
+      "verdict": "violation",
+      "evidence": "server.js",
+      "fix": "로그인 및 외부 API 호출 엔드포인트에 rate limiting 미들웨어를 추가하세요.",
+      "by": "ai"
+    }
+  ],
+  "source": "ai",
+  "model": "gemini-flash-lite-latest",
+  "error": null
+}

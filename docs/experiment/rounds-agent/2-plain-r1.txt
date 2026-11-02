@@ -1,0 +1,797 @@
+=== package.json ===
+{
+  "name": "study-attendance",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  }
+}
+
+=== fines.js ===
+// 비즈니스 규칙: 출석 상태, 벌금 계산, 정산. 순수 함수만 둔다 (DB·HTTP 없음).
+export const STATUSES = ["present", "late", "absent"];
+
+export function isValidFine(n) {
+  return Number.isInteger(n) && n >= 0;
+}
+
+export function isValidPaymentAmount(n) {
+  return Number.isInteger(n) && n > 0;
+}
+
+export function fineFor(status, settings) {
+  if (status === "late") return settings.lateFine;
+  if (status === "absent") return settings.absentFine;
+  return 0;
+}
+
+// records: [{ memberId, status }], ledger: [{ memberId, amount }] (납부는 +, 취소는 -)
+export function summarize({ members, records, ledger, settings }) {
+  return members.map((m) => {
+    const counts = { present: 0, late: 0, absent: 0 };
+    let fine = 0;
+    for (const r of records) {
+      if (r.memberId !== m.id) continue;
+      counts[r.status]++;
+      fine += fineFor(r.status, settings);
+    }
+    const paid = ledger
+      .filter((e) => e.memberId === m.id)
+      .reduce((sum, e) => sum + e.amount, 0);
+    return { memberId: m.id, name: m.name, ...counts, fine, paid, due: fine - paid };
+  });
+}
+
+=== db.js ===
+// 데이터 접근 계층: SQLite + prepared statement(파라미터 바인딩)만 사용한다.
+import Database from "better-sqlite3";
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  late_fine INTEGER NOT NULL, absent_fine INTEGER NOT NULL);
+INSERT OR IGNORE INTO settings VALUES (1, 1000, 3000);
+CREATE TABLE IF NOT EXISTS members (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX IF NOT EXISTS members_active_name ON members(name) WHERE archived = 0;
+CREATE TABLE IF NOT EXISTS meetings (
+  id TEXT PRIMARY KEY, date TEXT NOT NULL, title TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS records (
+  meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id),
+  status TEXT NOT NULL CHECK (status IN ('present','late','absent')),
+  PRIMARY KEY (meeting_id, member_id));
+CREATE TABLE IF NOT EXISTS ledger (
+  id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL REFERENCES members(id),
+  amount INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('payment','reversal')),
+  reverses TEXT REFERENCES ledger(id),
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_one_reversal ON ledger(reverses) WHERE reverses IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
+  BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger
+  BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin','viewer')));
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL);
+`;
+
+export function openDb(file) {
+  const db = new Database(file);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.exec(SCHEMA);
+  return createRepo(db);
+}
+
+function createRepo(db) {
+  const s = (sql) => db.prepare(sql);
+  const st = {
+    settings: s("SELECT late_fine AS lateFine, absent_fine AS absentFine FROM settings WHERE id = 1"),
+    setSettings: s("UPDATE settings SET late_fine = ?, absent_fine = ? WHERE id = 1"),
+    members: s("SELECT id, name FROM members WHERE archived = 0 ORDER BY rowid"),
+    member: s("SELECT id, name FROM members WHERE id = ? AND archived = 0"),
+    addMember: s("INSERT INTO members (id, name) VALUES (?, ?)"),
+    archiveMember: s("UPDATE members SET archived = 1 WHERE id = ?"),
+    meetings: s("SELECT id, date, title FROM meetings ORDER BY date DESC, rowid DESC"),
+    meeting: s("SELECT id FROM meetings WHERE id = ?"),
+    addMeeting: s("INSERT INTO meetings (id, date, title) VALUES (?, ?, ?)"),
+    deleteMeeting: s("DELETE FROM meetings WHERE id = ?"),
+    records: s(`SELECT r.meeting_id AS meetingId, r.member_id AS memberId, r.status
+                FROM records r JOIN members m ON m.id = r.member_id WHERE m.archived = 0`),
+    upsertRecord: s(`INSERT INTO records (meeting_id, member_id, status) VALUES (?, ?, ?)
+                     ON CONFLICT (meeting_id, member_id) DO UPDATE SET status = excluded.status`),
+    ledger: s(`SELECT l.id, l.member_id AS memberId, m.name AS memberName, l.amount, l.kind,
+                      l.reverses, l.created_at AS createdAt, l.created_by AS createdBy
+               FROM ledger l JOIN members m ON m.id = l.member_id ORDER BY l.rowid`),
+    ledgerEntry: s("SELECT id, member_id AS memberId, amount, kind FROM ledger WHERE id = ?"),
+    reversalOf: s("SELECT id FROM ledger WHERE reverses = ?"),
+    addLedger: s(`INSERT INTO ledger (id, member_id, amount, kind, reverses, created_at, created_by)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    countUsers: s("SELECT COUNT(*) AS n FROM users"),
+    userByName: s("SELECT id, username, password_hash AS passwordHash, role FROM users WHERE username = ?"),
+    addUser: s("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)"),
+    addToken: s("INSERT INTO auth_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)"),
+    deleteToken: s("DELETE FROM auth_tokens WHERE token_hash = ?"),
+    purgeTokens: s("DELETE FROM auth_tokens WHERE expires_at < ?"),
+    userByToken: s(`SELECT u.id, u.username, u.role FROM auth_tokens t JOIN users u ON u.id = t.user_id
+                    WHERE t.token_hash = ? AND t.expires_at > ?`),
+  };
+
+  return {
+    getSettings: () => st.settings.get(),
+    setSettings: (late, absent) => st.setSettings.run(late, absent),
+    listMembers: () => st.members.all(),
+    getMember: (id) => st.member.get(id),
+    addMember: (id, name) => st.addMember.run(id, name),
+    archiveMember: (id) => st.archiveMember.run(id).changes,
+    listMeetings: () => st.meetings.all(),
+    meetingExists: (id) => Boolean(st.meeting.get(id)),
+    addMeeting: db.transaction((id, date, title, memberIds) => {
+      st.addMeeting.run(id, date, title);
+      for (const mid of memberIds) st.upsertRecord.run(id, mid, "present");
+    }),
+    deleteMeeting: (id) => st.deleteMeeting.run(id).changes,
+    listRecords: () => st.records.all(),
+    setRecord: (meetingId, memberId, status) => st.upsertRecord.run(meetingId, memberId, status),
+    listLedger: () => st.ledger.all(),
+    getLedgerEntry: (id) => st.ledgerEntry.get(id),
+    isReversed: (id) => Boolean(st.reversalOf.get(id)),
+    appendLedger: (e) =>
+      st.addLedger.run(e.id, e.memberId, e.amount, e.kind, e.reverses ?? null, e.createdAt, e.createdBy),
+    countUsers: () => st.countUsers.get().n,
+    getUserByName: (name) => st.userByName.get(name),
+    addUser: (id, username, hash, role) => st.addUser.run(id, username, hash, role),
+    addToken: (hash, userId, expiresAt) => st.addToken.run(hash, userId, expiresAt),
+    deleteToken: (hash) => st.deleteToken.run(hash),
+    purgeTokens: (now) => st.purgeTokens.run(now),
+    getUserByToken: (hash, now) => st.userByToken.get(hash, now),
+  };
+}
+
+=== auth.js ===
+// 인증·권한: 로그인 토큰(httpOnly 쿠키)과 역할(admin/viewer) 확인. 모든 /api 요청이 거친다.
+import crypto from "node:crypto";
+
+const TTL_MS = 12 * 60 * 60 * 1000;
+const sha256 = (t) => crypto.createHash("sha256").update(t).digest("hex");
+const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString("hex"));
+
+export function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  return salt.toString("hex") + ":" + crypto.scryptSync(pw, salt, 64).toString("hex");
+}
+
+function verifyPassword(pw, stored) {
+  const [salt, hash] = stored.split(":");
+  const calc = crypto.scryptSync(pw, Buffer.from(salt, "hex"), 64);
+  return crypto.timingSafeEqual(calc, Buffer.from(hash, "hex"));
+}
+
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+export function createAuth(repo, { secureCookie }) {
+  const cookie = (value, maxAge) =>
+    `sid=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secureCookie ? "; Secure" : ""}`;
+
+  return {
+    login(req, res) {
+      const username = String(req.body.username || "");
+      const password = String(req.body.password || "");
+      const user = repo.getUserByName(username);
+      const ok = verifyPassword(password, user ? user.passwordHash : DUMMY_HASH) && Boolean(user);
+      if (!ok) return res.status(401).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+      const token = crypto.randomBytes(32).toString("hex");
+      repo.purgeTokens(Date.now());
+      repo.addToken(sha256(token), user.id, Date.now() + TTL_MS);
+      res.setHeader("Set-Cookie", cookie(token, TTL_MS / 1000));
+      res.json({ username: user.username, role: user.role });
+    },
+    logout(req, res) {
+      const token = readCookie(req, "sid");
+      if (token) repo.deleteToken(sha256(token));
+      res.setHeader("Set-Cookie", cookie("", 0));
+      res.status(204).end();
+    },
+    requireLogin(req, res, next) {
+      const token = readCookie(req, "sid");
+      const user = token && repo.getUserByToken(sha256(token), Date.now());
+      if (!user) return res.status(401).json({ error: "로그인이 필요합니다." });
+      req.user = user;
+      next();
+    },
+    requireAdmin(req, res, next) {
+      if (req.user?.role !== "admin") return res.status(403).json({ error: "관리자만 할 수 있습니다." });
+      next();
+    },
+  };
+}
+
+=== routes.js ===
+// HTTP 라우팅: 입력 검증 → 규칙(fines.js) → 저장(db.js). 계산 로직은 여기 두지 않는다.
+import express from "express";
+import crypto from "node:crypto";
+import { STATUSES, isValidFine, isValidPaymentAmount, summarize } from "./fines.js";
+import { hashPassword } from "./auth.js";
+
+const newId = () => crypto.randomUUID();
+
+export function createApiRouter(repo, auth) {
+  const r = express.Router();
+  const admin = auth.requireAdmin;
+
+  r.get("/me", (req, res) => res.json({ username: req.user.username, role: req.user.role }));
+
+  r.get("/state", (req, res) => {
+    const settings = repo.getSettings();
+    const members = repo.listMembers();
+    const records = repo.listRecords();
+    const ledger = repo.listLedger();
+    const sessions = repo.listMeetings().map((m) => ({
+      ...m,
+      records: Object.fromEntries(records.filter((x) => x.meetingId === m.id).map((x) => [x.memberId, x.status])),
+    }));
+    res.json({
+      settings, members, sessions, ledger,
+      summary: summarize({ members, records, ledger, settings }),
+      user: { username: req.user.username, role: req.user.role },
+    });
+  });
+
+  r.put("/settings", admin, (req, res) => {
+    const lateFine = Number(req.body.lateFine);
+    const absentFine = Number(req.body.absentFine);
+    if (!isValidFine(lateFine) || !isValidFine(absentFine)) {
+      return res.status(400).json({ error: "벌금은 0 이상의 정수여야 합니다." });
+    }
+    repo.setSettings(lateFine, absentFine);
+    res.json({ lateFine, absentFine });
+  });
+
+  r.post("/members", admin, (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name || name.length > 30) return res.status(400).json({ error: "이름은 1~30자로 입력하세요." });
+    if (repo.listMembers().some((m) => m.name === name)) {
+      return res.status(409).json({ error: "이미 있는 이름입니다." });
+    }
+    const member = { id: newId(), name };
+    repo.addMember(member.id, member.name);
+    res.status(201).json(member);
+  });
+
+  // 납부 장부를 보존하기 위해 멤버는 지우지 않고 보관(archived) 처리한다.
+  r.delete("/members/:id", admin, (req, res) => {
+    if (!repo.archiveMember(req.params.id)) return res.status(404).json({ error: "멤버를 찾을 수 없습니다." });
+    res.status(204).end();
+  });
+
+  r.post("/sessions", admin, (req, res) => {
+    const date = String(req.body.date || "");
+    const title = String(req.body.title || "").trim().slice(0, 50);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "날짜 형식이 올바르지 않습니다." });
+    const id = newId();
+    repo.addMeeting(id, date, title, repo.listMembers().map((m) => m.id));
+    res.status(201).json({ id, date, title });
+  });
+
+  r.put("/sessions/:id/records/:memberId", admin, (req, res) => {
+    const { status } = req.body;
+    if (!STATUSES.includes(status)) return res.status(400).json({ error: "잘못된 출석 상태입니다." });
+    if (!repo.meetingExists(req.params.id)) return res.status(404).json({ error: "모임을 찾을 수 없습니다." });
+    if (!repo.getMember(req.params.memberId)) return res.status(404).json({ error: "멤버를 찾을 수 없습니다." });
+    repo.setRecord(req.params.id, req.params.memberId, status);
+    res.json({ status });
+  });
+
+  r.delete("/sessions/:id", admin, (req, res) => {
+    if (!repo.deleteMeeting(req.params.id)) return res.status(404).json({ error: "모임을 찾을 수 없습니다." });
+    res.status(204).end();
+  });
+
+  // 납부는 장부에 추가만 한다. 수정·삭제 없음.
+  r.post("/payments", admin, (req, res) => {
+    const amount = Number(req.body.amount);
+    const memberId = String(req.body.memberId || "");
+    if (!isValidPaymentAmount(amount)) return res.status(400).json({ error: "금액은 1 이상의 정수여야 합니다." });
+    if (!repo.getMember(memberId)) return res.status(404).json({ error: "멤버를 찾을 수 없습니다." });
+    const entry = {
+      id: newId(), memberId, amount, kind: "payment",
+      createdAt: new Date().toISOString(), createdBy: req.user.username,
+    };
+    repo.appendLedger(entry);
+    res.status(201).json(entry);
+  });
+
+  // 취소는 원 기록을 지우지 않고 반대 금액의 취소 기록을 추가한다.
+  r.post("/payments/:id/reversal", admin, (req, res) => {
+    const original = repo.getLedgerEntry(req.params.id);
+    if (!original || original.kind !== "payment") return res.status(404).json({ error: "납부 기록을 찾을 수 없습니다." });
+    if (repo.isReversed(original.id)) return res.status(409).json({ error: "이미 취소된 납부입니다." });
+    const entry = {
+      id: newId(), memberId: original.memberId, amount: -original.amount, kind: "reversal",
+      reverses: original.id, createdAt: new Date().toISOString(), createdBy: req.user.username,
+    };
+    repo.appendLedger(entry);
+    res.status(201).json(entry);
+  });
+
+  r.post("/users", admin, (req, res) => {
+    const username = String(req.body.username || "").trim();
+    const password = String(req.body.password || "");
+    const role = req.body.role === "admin" ? "admin" : "viewer";
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) return res.status(400).json({ error: "아이디는 영문·숫자·_ 3~20자입니다." });
+    if (password.length < 8) return res.status(400).json({ error: "비밀번호는 8자 이상이어야 합니다." });
+    if (repo.getUserByName(username)) return res.status(409).json({ error: "이미 있는 아이디입니다." });
+    repo.addUser(newId(), username, hashPassword(password), role);
+    res.status(201).json({ username, role });
+  });
+
+  return r;
+}
+
+=== server.js ===
+// 진입점: DB 열기, 미들웨어(rate limit·인증) 연결, 라우터 장착.
+import express from "express";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+import rateLimit from "express-rate-limit";
+import { openDb } from "./db.js";
+import { createAuth, hashPassword } from "./auth.js";
+import { createApiRouter } from "./routes.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, "data.db");
+const PORT = process.env.PORT || 3000;
+
+let repo;
+try {
+  repo = openDb(DB_FILE);
+} catch (err) {
+  console.error(`[db] 데이터베이스를 열 수 없습니다 (${DB_FILE}):`, err);
+  process.exit(1);
+}
+
+if (repo.countUsers() === 0) {
+  const pw = process.env.ADMIN_PASSWORD;
+  if (!pw || pw.length < 8) {
+    console.error("[auth] 첫 실행입니다. ADMIN_PASSWORD 환경변수(8자 이상)로 관리자 비밀번호를 지정하세요.");
+    process.exit(1);
+  }
+  repo.addUser(crypto.randomUUID(), "admin", hashPassword(pw), "admin");
+  console.log("[auth] 관리자 계정 'admin'을 만들었습니다.");
+}
+
+const auth = createAuth(repo, { secureCookie: process.env.NODE_ENV === "production" });
+const limitJson = (error) => ({ standardHeaders: "draft-7", legacyHeaders: false, message: { error } });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, ...limitJson("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.") });
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, ...limitJson("요청이 너무 많습니다. 잠시 후 다시 시도하세요.") });
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000, limit: 30,
+  skip: (req) => req.method === "GET",
+  ...limitJson("변경 요청이 너무 많습니다. 잠시 후 다시 시도하세요."),
+});
+
+const app = express();
+app.set("trust proxy", Number(process.env.TRUST_PROXY || 0));
+app.use(express.json({ limit: "10kb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+app.post("/api/login", loginLimiter, auth.login);
+app.post("/api/logout", apiLimiter, auth.logout);
+app.use("/api", apiLimiter, auth.requireLogin, writeLimiter, createApiRouter(repo, auth));
+
+app.use((err, req, res, next) => {
+  console.error(`[error] ${req.method} ${req.originalUrl}:`, err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: "서버 오류가 발생했습니다." });
+});
+
+app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>스터디 출석 · 벌금 정산</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>스터디 출석 · 벌금 정산</h1>
+    <span id="whoami"></span>
+  </header>
+  <main>
+    <section id="login-view" hidden>
+      <h2>로그인</h2>
+      <form id="login-form" class="row">
+        <input name="username" placeholder="아이디" autocomplete="username" required />
+        <input name="password" type="password" placeholder="비밀번호" autocomplete="current-password" required />
+        <button>로그인</button>
+      </form>
+    </section>
+
+    <div id="app-view" hidden>
+      <section>
+        <h2>멤버</h2>
+        <form id="member-form" class="row admin-only">
+          <input name="name" placeholder="이름" maxlength="30" required />
+          <button>추가</button>
+        </form>
+        <ul id="members" class="chips"></ul>
+      </section>
+
+      <section>
+        <h2>벌금 규칙</h2>
+        <form id="settings-form" class="row">
+          <label>지각 <input name="lateFine" type="number" min="0" step="100" />원</label>
+          <label>결석 <input name="absentFine" type="number" min="0" step="100" />원</label>
+          <button class="admin-only">저장</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>모임 출석</h2>
+        <form id="session-form" class="row admin-only">
+          <input name="date" type="date" required />
+          <input name="title" placeholder="주제 (선택)" maxlength="50" />
+          <button>모임 추가</button>
+        </form>
+        <div id="sessions"></div>
+      </section>
+
+      <section>
+        <h2>정산</h2>
+        <table>
+          <thead>
+            <tr><th>이름</th><th>출석</th><th>지각</th><th>결석</th><th>벌금</th><th>납부</th><th>미납</th><th></th></tr>
+          </thead>
+          <tbody id="summary"></tbody>
+          <tfoot id="summary-total"></tfoot>
+        </table>
+        <h3>납부 장부</h3>
+        <ul id="payments" class="list"></ul>
+      </section>
+
+      <section class="admin-only">
+        <h2>계정 추가</h2>
+        <form id="user-form" class="row">
+          <input name="username" placeholder="아이디" required />
+          <input name="password" type="password" placeholder="비밀번호 (8자 이상)" minlength="8" required />
+          <select name="role"><option value="viewer">조회 전용</option><option value="admin">관리자</option></select>
+          <button>추가</button>
+        </form>
+      </section>
+    </div>
+  </main>
+  <p id="error" role="alert"></p>
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/style.css ===
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #222; }
+header { background: #2d4a7a; color: #fff; padding: 16px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+header h1 { margin: 0; font-size: 20px; }
+header button { background: #fff; color: #2d4a7a; }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+h2 { margin: 0 0 12px; font-size: 17px; }
+h3 { font-size: 15px; margin: 16px 0 8px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input, select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+input[type=number] { width: 90px; }
+button { padding: 6px 12px; border: 0; border-radius: 4px; background: #2d4a7a; color: #fff; cursor: pointer; }
+button.ghost { background: transparent; color: #a33; padding: 2px 6px; }
+body:not(.is-admin) .admin-only { display: none; }
+.chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chips li { background: #eef2f8; border-radius: 16px; padding: 4px 12px; }
+.session { border-top: 1px solid #eee; padding: 12px 0; }
+.session-head { display: flex; justify-content: space-between; align-items: center; }
+.records { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-top: 8px; }
+.record { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+select.present { background: #e7f6ec; } select.late { background: #fff4d6; } select.absent { background: #fde4e4; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px; border-bottom: 1px solid #eee; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+td.due { font-weight: 600; color: #a33; }
+td.done { color: #2a7a3a; }
+.list { padding-left: 18px; }
+.list .reversed { text-decoration: line-through; color: #888; }
+#error { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); background: #a33; color: #fff; padding: 8px 14px; border-radius: 6px; display: none; }
+#error.show { display: block; }
+@media (max-width: 600px) { th, td { padding: 4px; font-size: 13px; } }
+
+=== public/app.js ===
+const STATUS_LABEL = { present: "출석", late: "지각", absent: "결석" };
+const won = (n) => n.toLocaleString("ko-KR") + "원";
+let state = null;
+const isAdmin = () => state?.user.role === "admin";
+
+class AuthError extends Error {}
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const Err = res.status === 401 && url !== "/api/login" ? AuthError : Error;
+    throw new Err(err.error || "요청에 실패했습니다.");
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function showError(msg) {
+  const el = document.getElementById("error");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+function handleError(e) {
+  if (e instanceof AuthError) showLogin();
+  showError(e.message);
+}
+
+async function run(fn) {
+  try { await fn(); await refresh(); } catch (e) { handleError(e); }
+}
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k === "class") node.className = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+function showLogin() {
+  state = null;
+  document.body.classList.remove("is-admin");
+  document.getElementById("whoami").replaceChildren();
+  document.getElementById("login-view").hidden = false;
+  document.getElementById("app-view").hidden = true;
+}
+
+function renderHeader() {
+  document.getElementById("login-view").hidden = true;
+  document.getElementById("app-view").hidden = false;
+  document.body.classList.toggle("is-admin", isAdmin());
+  document.getElementById("whoami").replaceChildren(
+    `${state.user.username} (${isAdmin() ? "관리자" : "조회 전용"}) `,
+    el("button", { onclick: () => api("POST", "/api/logout").then(showLogin, handleError) }, "로그아웃"));
+}
+
+function renderMembers() {
+  const ul = document.getElementById("members");
+  ul.replaceChildren(...state.members.map((m) =>
+    el("li", {}, m.name, isAdmin() ? el("button", {
+      class: "ghost", title: "보관",
+      onclick: () => confirm(`${m.name} 님을 목록에서 뺄까요? 납부 장부는 보존됩니다.`)
+        && run(() => api("DELETE", `/api/members/${m.id}`)),
+    }, "×") : "")
+  ));
+}
+
+function renderSettings() {
+  const f = document.getElementById("settings-form");
+  f.lateFine.value = state.settings.lateFine;
+  f.absentFine.value = state.settings.absentFine;
+  f.lateFine.disabled = f.absentFine.disabled = !isAdmin();
+}
+
+function renderSessions() {
+  const box = document.getElementById("sessions");
+  if (!state.sessions.length) { box.replaceChildren(el("p", {}, "아직 모임이 없습니다.")); return; }
+  box.replaceChildren(...state.sessions.map((s) => {
+    const records = state.members.map((m) => {
+      const status = s.records[m.id];
+      const select = el("select", {
+        class: status || "",
+        onchange: (e) => run(() => api("PUT", `/api/sessions/${s.id}/records/${m.id}`, { status: e.target.value })),
+      });
+      select.disabled = !isAdmin();
+      if (!status) select.append(el("option", { value: "", disabled: "", selected: "" }, "미기록"));
+      for (const [value, label] of Object.entries(STATUS_LABEL)) {
+        const opt = el("option", { value }, label);
+        if (value === status) opt.selected = true;
+        select.append(opt);
+      }
+      return el("div", { class: "record" }, m.name, select);
+    });
+    return el("div", { class: "session" },
+      el("div", { class: "session-head" },
+        el("strong", {}, `${s.date}${s.title ? " · " + s.title : ""}`),
+        isAdmin() ? el("button", {
+          class: "ghost",
+          onclick: () => confirm("이 모임을 삭제할까요?") && run(() => api("DELETE", `/api/sessions/${s.id}`)),
+        }, "삭제") : ""),
+      el("div", { class: "records" }, ...records));
+  }));
+}
+
+function renderSummary() {
+  const tbody = document.getElementById("summary");
+  tbody.replaceChildren(...state.summary.map((r) => {
+    const payBtn = r.due > 0 && isAdmin()
+      ? el("button", {
+          onclick: () => {
+            const input = prompt(`${r.name} 님 납부 금액`, r.due);
+            if (input === null) return;
+            run(() => api("POST", "/api/payments", { memberId: r.memberId, amount: Number(input) }));
+          },
+        }, "납부")
+      : "";
+    return el("tr", {},
+      el("td", {}, r.name),
+      el("td", {}, String(r.present)),
+      el("td", {}, String(r.late)),
+      el("td", {}, String(r.absent)),
+      el("td", {}, won(r.fine)),
+      el("td", {}, won(r.paid)),
+      el("td", { class: r.due > 0 ? "due" : "done" }, r.due > 0 ? won(r.due) : r.due < 0 ? `초과 ${won(-r.due)}` : "완납"),
+      el("td", {}, payBtn));
+  }));
+  const sum = (k) => state.summary.reduce((a, r) => a + r[k], 0);
+  document.getElementById("summary-total").replaceChildren(
+    el("tr", {},
+      el("th", {}, "합계"), el("th", {}), el("th", {}), el("th", {}),
+      el("th", {}, won(sum("fine"))), el("th", {}, won(sum("paid"))),
+      el("th", {}, won(Math.max(0, sum("due")))), el("th", {})));
+
+  const ul = document.getElementById("payments");
+  const reversed = new Set(state.ledger.filter((e) => e.reverses).map((e) => e.reverses));
+  const entries = [...state.ledger].reverse();
+  if (!entries.length) { ul.replaceChildren(el("li", {}, "납부 기록이 없습니다.")); return; }
+  ul.replaceChildren(...entries.map((e) => {
+    const when = e.createdAt.slice(0, 16).replace("T", " ");
+    const label = e.kind === "payment" ? `납부 ${won(e.amount)}` : `납부 취소 ${won(e.amount)}`;
+    const cancel = e.kind === "payment" && !reversed.has(e.id) && isAdmin()
+      ? el("button", {
+          class: "ghost",
+          onclick: () => confirm("이 납부를 취소할까요? 취소 기록이 장부에 추가됩니다.")
+            && run(() => api("POST", `/api/payments/${e.id}/reversal`)),
+        }, "취소")
+      : "";
+    return el("li", { class: reversed.has(e.id) ? "reversed" : "" },
+      `${when} · ${e.memberName} · ${label} · 기록: ${e.createdBy} `, cancel);
+  }));
+}
+
+async function refresh() {
+  state = await api("GET", "/api/state");
+  renderHeader();
+  renderMembers();
+  renderSettings();
+  renderSessions();
+  renderSummary();
+}
+
+document.getElementById("login-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => {
+    await api("POST", "/api/login", { username: f.username.value, password: f.password.value });
+    f.reset();
+  });
+});
+
+document.getElementById("member-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => { await api("POST", "/api/members", { name: f.name.value }); f.reset(); });
+});
+
+document.getElementById("settings-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(() => api("PUT", "/api/settings", { lateFine: Number(f.lateFine.value), absentFine: Number(f.absentFine.value) }));
+});
+
+document.getElementById("session-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => { await api("POST", "/api/sessions", { date: f.date.value, title: f.title.value }); f.title.value = ""; });
+});
+
+document.getElementById("user-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  run(async () => {
+    await api("POST", "/api/users", { username: f.username.value, password: f.password.value, role: f.role.value });
+    f.reset();
+  });
+});
+
+document.getElementById("session-form").date.valueAsDate = new Date();
+refresh().catch((e) => (e instanceof AuthError ? showLogin() : showError(e.message)));
+
+=== docs/decisions.md ===
+# 설계 결정 기록
+
+## 1. 저장소: JSON 파일 → SQLite (better-sqlite3)
+- 동시 요청 시 파일 덮어쓰기 경합, 부분 쓰기 위험을 없애기 위해 SQLite로 옮겼다.
+- 모든 쿼리는 `db.js`의 prepared statement + 파라미터 바인딩으로만 실행한다. 문자열로 SQL을 조립하지 않는다.
+- 소규모 스터디 규모라 별도 DB 서버 없이 파일 하나(`data.db`)로 충분하다.
+
+## 2. 모듈 분리
+- `fines.js`: 벌금·정산 규칙 (순수 함수, 테스트 대상)
+- `db.js`: 데이터 접근
+- `auth.js`: 로그인·권한
+- `routes.js`: HTTP 라우팅과 입력 검증
+- `server.js`: 조립과 미들웨어
+
+## 3. 납부는 장부(ledger)로만 기록
+- 납부 금액을 수정·삭제하지 않는다. 납부는 `payment` 행 추가, 취소는 원 기록을 가리키는 `reversal`(음수) 행 추가.
+- DB 트리거로 ledger의 UPDATE/DELETE를 막고, 한 납부당 취소는 한 번만 가능(고유 인덱스).
+- 각 기록에 시각과 기록한 사용자를 남긴다. 납부 합계 = 장부 금액의 합.
+- 장부가 멤버를 참조하므로 멤버 삭제는 보관(archived) 처리로 바꿨다.
+
+## 4. 인증·권한
+- 서버가 모든 `/api` 요청에서 로그인 토큰(httpOnly, SameSite=Strict 쿠키)을 확인한다. 토큰은 해시만 DB에 저장, 12시간 만료.
+- 역할은 `admin`(변경 가능)과 `viewer`(조회만) 두 가지. 변경 요청은 서버에서 `requireAdmin`으로 확인하며, 화면에서 버튼을 숨기는 것은 편의일 뿐이다.
+- 첫 관리자 계정은 `ADMIN_PASSWORD` 환경변수로 만든다. 비밀번호는 scrypt로 해시.
+
+## 5. 요청 횟수 제한
+- 로그인: IP당 15분 10회. API 전체: 분당 120회. 변경 요청: 분당 30회.
+- 프록시 뒤에서 운영할 때는 `TRUST_PROXY`를 설정해야 IP가 올바르게 잡힌다.
+
+## 6. 에러 처리
+- DB를 열지 못하면 원인을 로그로 남기고 종료한다 (빈 데이터로 조용히 시작하지 않음).
+- 처리되지 않은 서버 오류는 에러 미들웨어가 로그로 남기고 500을 돌려준다.
+
+## 7. 그대로 둔 것
+- 벌금은 현재 설정 금액으로 전체 기록을 다시 계산한다(설정 변경이 과거 기록에도 적용됨). 모임별 금액 고정이 필요하면 기록에 금액을 저장하도록 바꿔야 한다.
+
+=== README.md ===
+# 스터디 출석 · 벌금 정산
+
+```
+npm install
+ADMIN_PASSWORD='8자이상비밀번호' npm start   # http://localhost:3000, 관리자 아이디: admin
+```
+
+- 멤버 추가/보관, 모임(날짜) 추가 후 멤버별 출석/지각/결석 기록
+- 지각·결석 벌금 금액 설정, 멤버별 벌금 합계·납부·미납 자동 계산
+- 납부는 장부에 추가만 되고, 취소도 취소 기록으로 남습니다
+- 관리자/조회 전용 계정, 로그인·API 요청 횟수 제한
+- 데이터는 SQLite 파일 `data.db`에 저장됩니다 (`DB_FILE`로 경로 변경)
+- 설계 결정은 `docs/decisions.md` 참고
+
+=== CHANGES ===
+1. 역할 분리: 벌금·정산 규칙은 fines.js, 데이터 접근은 db.js, 인증은 auth.js, 라우팅은 routes.js로 나누고 server.js는 조립만 한다.
+2. 조용한 실패 제거: load()의 빈 catch를 없애고, DB 열기 실패는 원인을 로그로 남기고 종료하며, 처리되지 않은 오류는 에러 미들웨어가 로그 후 500 응답.
+3. 결정 기록: docs/decisions.md 추가 (저장소, 모듈 분리, 장부, 인증, rate limit, 에러 처리, 그대로 둔 것).
+4. 납부 장부: 납부는 ledger에 추가만, 취소는 반대 금액의 reversal 기록 추가(POST /api/payments/:id/reversal). DB 트리거로 수정·삭제 차단, 기록 시각·기록자 저장. 장부 보존을 위해 멤버 삭제는 보관 처리로 변경.
+5. 서버 권한 확인: 로그인(scrypt 해시, 해시된 토큰 쿠키) 추가, 모든 /api 요청에 requireLogin, 변경 요청에 requireAdmin. 관리자/조회 전용 계정과 계정 추가 API·화면.
+6. DB 사용: data.json 대신 SQLite(better-sqlite3), 모든 쿼리를 prepared statement 파라미터 바인딩으로 실행.
+7. Rate limiting: express-rate-limit로 로그인(15분 10회), API 전체(분당 120회), 변경 요청(분당 30회) 제한.

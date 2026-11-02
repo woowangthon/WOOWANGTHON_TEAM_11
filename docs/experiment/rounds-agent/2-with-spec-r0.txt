@@ -1,0 +1,825 @@
+=== package.json ===
+{
+  "name": "study-fines",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "^15.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.3"
+  }
+}
+
+=== .gitignore ===
+node_modules
+.next
+.env
+.env.local
+
+=== .env.example ===
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SITE_URL=
+
+=== postcss.config.mjs ===
+export default { plugins: { '@tailwindcss/postcss': {} } };
+
+=== docs/decisions.md ===
+# Design decisions
+
+1. **All writes go through Next.js route handlers using the service-role key; RLS allows members read-only access.**
+   Reason: every write is authorized and validated on the server, and the database denies direct writes from browsers even if the API is bypassed.
+   Rejected: RLS insert/update policies for clients (fine rules would then live in SQL policies and a member could insert rows directly).
+2. **Fines are an append-only ledger (`fine_entries`); balances are computed, never stored.**
+   Reason: security rule "never overwrite an amount". Waive = entry bringing the attendance balance to 0; adjust = entry with the difference; payment = positive `payment` entry.
+   Rejected: a `fine_amount` column on `attendance` updated in place.
+3. **Multi-row writes (attendance + charge + audit) run in one Postgres function, executable only by service_role.** Fine amounts are computed in `lib/domain/rules.ts` and passed in; the function only stores them atomically and checks the expected balance (row lock) so concurrent edits cannot double-apply.
+   Rejected: separate supabase-js inserts (partial writes on failure).
+4. **The host role is stored once, in `group_members.role`, and created in the same transaction as the group.** `groups.owner_id` is unique to enforce "one group created per user".
+5. **Status is decided by the server clock:** check-in at or before `starts_at + grace_minutes` is present, later is late. Members not checked in when the host closes the session are absent. Check-in opens 30 minutes before start. Times are stored as `timestamptz` (UTC) and shown in Asia/Seoul.
+6. **Changing an attendance status resets that attendance's fine to the fixed fee of the new status** (a previous manual adjustment for that attendance is superseded; both remain in the ledger).
+7. **Payments are recorded by the host (cash/transfer).** No payment provider is integrated, so there are no webhooks; a payment cannot exceed the outstanding balance.
+8. **Fees are fixed at group creation and not editable**, so past charges never depend on a changed setting. Rejected: editable fee columns (would be an in-place amount change).
+9. **Rate limiting is in memory per server instance** (login start, join-by-code). Rejected for now: Redis/Upstash (extra paid/hosted dependency). On Vercel this limits per instance only.
+10. **Dashboard refreshes after each action (router.refresh) rather than Supabase Realtime.** Aggregation is done in `summarize()` over the group's ledger, which is indexed by `(group_id, user_id)`.
+
+=== supabase/schema.sql ===
+create table profiles (
+  id uuid primary key references auth.users on delete cascade,
+  display_name text not null default '',
+  created_at timestamptz not null default now()
+);
+create function handle_new_user() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into profiles(id, display_name)
+  values (new.id, coalesce(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', new.email, ''))
+  on conflict (id) do nothing;
+  return new;
+end $$;
+create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();
+
+create table groups (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null unique references profiles on delete cascade,
+  name text not null check (char_length(name) between 1 and 50),
+  join_code text not null unique,
+  late_fee int not null check (late_fee between 0 and 1000000),
+  absent_fee int not null check (absent_fee between 0 and 1000000),
+  grace_minutes int not null check (grace_minutes between 0 and 120),
+  created_at timestamptz not null default now()
+);
+create table group_members (
+  group_id uuid not null references groups on delete cascade,
+  user_id uuid not null references profiles on delete cascade,
+  role text not null check (role in ('host', 'member')),
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+create table study_sessions (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references groups on delete cascade,
+  starts_at timestamptz not null,
+  closed_at timestamptz,
+  created_by uuid not null references profiles
+);
+create index on study_sessions(group_id, starts_at desc);
+create table attendance (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references study_sessions on delete cascade,
+  user_id uuid not null references profiles on delete cascade,
+  status text not null check (status in ('present', 'late', 'absent')),
+  checked_at timestamptz not null default now(),
+  unique (session_id, user_id)
+);
+create table fine_entries (
+  id bigint generated always as identity primary key,
+  group_id uuid not null references groups on delete cascade,
+  user_id uuid not null references profiles on delete cascade,
+  attendance_id uuid references attendance on delete cascade,
+  kind text not null check (kind in ('charge', 'adjust', 'waive', 'payment')),
+  amount int not null,
+  reason text not null default '' check (char_length(reason) <= 200),
+  created_by uuid not null references profiles,
+  created_at timestamptz not null default now(),
+  check (kind <> 'payment' or amount > 0),
+  check ((kind = 'payment') = (attendance_id is null))
+);
+create index on fine_entries(group_id, user_id);
+create index on fine_entries(attendance_id);
+create table audit_log (
+  id bigint generated always as identity primary key,
+  group_id uuid not null references groups on delete cascade,
+  actor_id uuid not null references profiles,
+  action text not null,
+  detail jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+-- Atomic writers. Amounts are computed by the app (lib/domain/rules.ts); these only store them.
+create function create_group(p_owner uuid, p_name text, p_code text, p_late int, p_absent int, p_grace int)
+returns uuid language plpgsql as $$
+declare gid uuid;
+begin
+  insert into groups(owner_id, name, join_code, late_fee, absent_fee, grace_minutes)
+  values (p_owner, p_name, p_code, p_late, p_absent, p_grace) returning id into gid;
+  insert into group_members(group_id, user_id, role) values (gid, p_owner, 'host');
+  insert into audit_log(group_id, actor_id, action, detail)
+  values (gid, p_owner, 'group.create', jsonb_build_object('name', p_name, 'late_fee', p_late, 'absent_fee', p_absent));
+  return gid;
+end $$;
+
+create function record_attendance(p_session uuid, p_user uuid, p_status text, p_charge int, p_actor uuid)
+returns void language plpgsql as $$
+declare gid uuid; aid uuid;
+begin
+  select group_id into strict gid from study_sessions where id = p_session;
+  insert into attendance(session_id, user_id, status) values (p_session, p_user, p_status) returning id into aid;
+  if p_charge <> 0 then
+    insert into fine_entries(group_id, user_id, attendance_id, kind, amount, created_by)
+    values (gid, p_user, aid, 'charge', p_charge, p_actor);
+  end if;
+  insert into audit_log(group_id, actor_id, action, detail)
+  values (gid, p_actor, 'attendance.record', jsonb_build_object('attendance', aid, 'user', p_user, 'status', p_status, 'charge', p_charge));
+end $$;
+
+create function add_fine_entry(p_group uuid, p_user uuid, p_attendance uuid, p_kind text, p_amount int,
+  p_reason text, p_actor uuid, p_expected int, p_new_status text default null)
+returns void language plpgsql as $$
+declare cur int; old_status text;
+begin
+  if p_attendance is not null then
+    select status into strict old_status from attendance where id = p_attendance for update;
+    select coalesce(sum(amount), 0) into cur from fine_entries where attendance_id = p_attendance;
+    if cur <> p_expected then raise exception 'balance changed, retry' using errcode = '40001'; end if;
+    if p_new_status is not null then update attendance set status = p_new_status where id = p_attendance; end if;
+  end if;
+  if p_amount <> 0 then
+    insert into fine_entries(group_id, user_id, attendance_id, kind, amount, reason, created_by)
+    values (p_group, p_user, p_attendance, p_kind, p_amount, p_reason, p_actor);
+  end if;
+  insert into audit_log(group_id, actor_id, action, detail)
+  values (p_group, p_actor, 'fine.' || p_kind, jsonb_build_object('user', p_user, 'attendance', p_attendance,
+    'amount', p_amount, 'reason', p_reason, 'old_status', old_status, 'new_status', p_new_status));
+end $$;
+
+revoke execute on function create_group, record_attendance, add_fine_entry from public, anon, authenticated;
+grant execute on function create_group, record_attendance, add_fine_entry to service_role;
+
+-- Row-level security: members may read their group; nobody but service_role may write.
+create function is_member(g uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from group_members where group_id = g and user_id = auth.uid()) $$;
+create function is_host(g uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from group_members where group_id = g and user_id = auth.uid() and role = 'host') $$;
+
+alter table profiles enable row level security;
+alter table groups enable row level security;
+alter table group_members enable row level security;
+alter table study_sessions enable row level security;
+alter table attendance enable row level security;
+alter table fine_entries enable row level security;
+alter table audit_log enable row level security;
+
+create policy read_profiles on profiles for select using (
+  id = auth.uid() or exists (select 1 from group_members m where m.user_id = profiles.id and is_member(m.group_id)));
+create policy read_groups on groups for select using (is_member(id));
+create policy read_members on group_members for select using (is_member(group_id));
+create policy read_sessions on study_sessions for select using (is_member(group_id));
+create policy read_attendance on attendance for select using (
+  exists (select 1 from study_sessions s where s.id = session_id and is_member(s.group_id)));
+create policy read_fines on fine_entries for select using (is_member(group_id));
+create policy read_audit on audit_log for select using (is_host(group_id));
+
+=== lib/domain/rules.ts ===
+// Business rules only: no UI, no network.
+export type Status = 'present' | 'late' | 'absent';
+export type EntryKind = 'charge' | 'adjust' | 'waive' | 'payment';
+export interface FeePolicy { lateFee: number; absentFee: number; graceMinutes: number }
+export interface LedgerEntry { userId: string; attendanceId: string | null; kind: EntryKind; amount: number }
+export interface MemberSummary { userId: string; fined: number; paid: number; outstanding: number; paidUp: boolean }
+
+export const CHECK_IN_OPENS_BEFORE_MIN = 30;
+
+export class RuleError extends Error {}
+
+/** Fixed-amount rule: late -> late fee, absent -> absent fee, present -> 0. */
+export function fineFor(status: Status, policy: FeePolicy): number {
+  if (status === 'late') return policy.lateFee;
+  if (status === 'absent') return policy.absentFee;
+  return 0;
+}
+
+export function classifyCheckIn(now: Date, startsAt: Date, closedAt: Date | null, graceMinutes: number): Status {
+  if (closedAt) throw new RuleError('이미 마감된 출석입니다');
+  if (now.getTime() < startsAt.getTime() - CHECK_IN_OPENS_BEFORE_MIN * 60_000) {
+    throw new RuleError(`출석은 시작 ${CHECK_IN_OPENS_BEFORE_MIN}분 전부터 가능합니다`);
+  }
+  return now.getTime() <= startsAt.getTime() + graceMinutes * 60_000 ? 'present' : 'late';
+}
+
+/** Current fine of one attendance record, derived from the ledger. */
+export function attendanceBalance(entries: LedgerEntry[], attendanceId: string): number {
+  return entries.filter((e) => e.attendanceId === attendanceId).reduce((s, e) => s + e.amount, 0);
+}
+
+/** Ledger delta that moves `current` to `target`. Used by adjust, waive and status change. */
+export function deltaTo(current: number, target: number): number {
+  if (!Number.isInteger(target) || target < 0) throw new RuleError('벌금은 0 이상의 정수여야 합니다');
+  return target - current;
+}
+
+export function summarize(entries: LedgerEntry[], memberIds: string[]): MemberSummary[] {
+  return memberIds.map((userId) => {
+    const mine = entries.filter((e) => e.userId === userId);
+    const fined = mine.filter((e) => e.kind !== 'payment').reduce((s, e) => s + e.amount, 0);
+    const paid = mine.filter((e) => e.kind === 'payment').reduce((s, e) => s + e.amount, 0);
+    const outstanding = fined - paid;
+    return { userId, fined, paid, outstanding, paidUp: outstanding <= 0 };
+  });
+}
+
+export function checkPayment(outstanding: number, amount: number): void {
+  if (amount > outstanding) throw new RuleError(`미납액(${outstanding}원)보다 많이 납부할 수 없습니다`);
+}
+
+=== lib/domain/inputs.ts ===
+import { z } from 'zod';
+
+const id = z.string().uuid();
+const won = z.coerce.number().int().min(0).max(1_000_000);
+
+export const createGroupInput = z.object({
+  name: z.string().trim().min(1).max(50),
+  lateFee: won,
+  absentFee: won,
+  graceMinutes: z.coerce.number().int().min(0).max(120),
+});
+export const joinInput = z.object({ code: z.string().trim().regex(/^[A-Z0-9]{8}$/, '코드는 8자리 영문 대문자/숫자입니다') });
+export const createSessionInput = z.object({ groupId: id, startsAt: z.string().datetime({ offset: true }) });
+export const sessionInput = z.object({ sessionId: id });
+export const statusInput = z.object({ attendanceId: id, status: z.enum(['present', 'late', 'absent']) });
+export const fineInput = z.object({
+  attendanceId: id,
+  action: z.enum(['adjust', 'waive']),
+  amount: won.optional(),
+  reason: z.string().trim().min(1).max(200),
+});
+export const paymentInput = z.object({ groupId: id, userId: id, amount: won.refine((n) => n > 0, '0보다 커야 합니다') });
+
+=== lib/errors.ts ===
+export class HttpError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+=== lib/services/supabase.ts ===
+import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+
+export function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing environment variable ${name}`);
+  return v;
+}
+
+/** Client acting as the logged-in user (RLS applies). */
+export async function userClient() {
+  const store = await cookies();
+  return createServerClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'), {
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (list) => {
+        try { list.forEach((c) => store.set(c.name, c.value, c.options)); }
+        catch (e) { console.debug('cookie refresh skipped in server component; middleware refreshes it', e); }
+      },
+    },
+  });
+}
+
+/** Service-role client. Only call after the server has authorized the request. */
+export function adminClient() {
+  return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), {
+    auth: { persistSession: false },
+  });
+}
+
+=== lib/services/rateLimit.ts ===
+import { HttpError } from '../errors.ts';
+
+const hits = new Map<string, number[]>();
+
+export function rateLimit(key: string, limit: number, windowMs: number): void {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (recent.length >= limit) throw new HttpError(429, '요청이 너무 많습니다. 잠시 후 다시 시도하세요');
+  recent.push(now);
+  hits.set(key, recent);
+}
+
+=== lib/services/repo.ts ===
+import { HttpError } from '../errors.ts';
+import type { FeePolicy, LedgerEntry, Status } from '../domain/rules.ts';
+import { adminClient } from './supabase.ts';
+
+type Res<T> = { data: T | null; error: { code?: string; message: string } | null };
+
+function must<T>(res: Res<T>, conflictMsg = '이미 처리된 요청입니다'): T {
+  if (res.error) {
+    if (res.error.code === '23505') throw new HttpError(409, conflictMsg);
+    if (res.error.code === '40001') throw new HttpError(409, '다른 변경이 먼저 반영되었습니다. 새로고침 후 다시 시도하세요');
+    throw new Error(res.error.message);
+  }
+  if (res.data === null) throw new HttpError(404, '대상을 찾을 수 없습니다');
+  return res.data;
+}
+
+export async function roleOf(groupId: string, userId: string): Promise<'host' | 'member' | null> {
+  const { data, error } = await adminClient().from('group_members').select('role')
+    .eq('group_id', groupId).eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data?.role as 'host' | 'member' | undefined) ?? null;
+}
+
+export async function policyOf(groupId: string): Promise<FeePolicy> {
+  const g = must(await adminClient().from('groups').select('late_fee, absent_fee, grace_minutes').eq('id', groupId).maybeSingle());
+  return { lateFee: g.late_fee, absentFee: g.absent_fee, graceMinutes: g.grace_minutes };
+}
+
+export async function groupByCode(code: string) {
+  return must(await adminClient().from('groups').select('id').eq('join_code', code).maybeSingle());
+}
+
+export async function getSession(sessionId: string) {
+  return must(await adminClient().from('study_sessions').select('id, group_id, starts_at, closed_at').eq('id', sessionId).maybeSingle());
+}
+
+export async function getAttendance(attendanceId: string) {
+  return must(await adminClient().from('attendance')
+    .select('id, user_id, status, study_sessions!inner(group_id)').eq('id', attendanceId).maybeSingle()) as unknown as
+    { id: string; user_id: string; status: Status; study_sessions: { group_id: string } };
+}
+
+export async function memberIds(groupId: string): Promise<string[]> {
+  return must(await adminClient().from('group_members').select('user_id').eq('group_id', groupId)).map((m) => m.user_id);
+}
+
+export async function attendedIds(sessionId: string): Promise<string[]> {
+  return must(await adminClient().from('attendance').select('user_id').eq('session_id', sessionId)).map((a) => a.user_id);
+}
+
+export async function ledger(groupId: string, userId?: string): Promise<LedgerEntry[]> {
+  let q = adminClient().from('fine_entries').select('user_id, attendance_id, kind, amount').eq('group_id', groupId);
+  if (userId) q = q.eq('user_id', userId);
+  return must(await q).map((e) => ({ userId: e.user_id, attendanceId: e.attendance_id, kind: e.kind, amount: e.amount }));
+}
+
+export async function rpc(fn: string, args: Record<string, unknown>, conflictMsg?: string): Promise<unknown> {
+  const res = await adminClient().rpc(fn, args);
+  return must({ data: res.data ?? true, error: res.error }, conflictMsg);
+}
+
+export async function insert(table: string, row: Record<string, unknown>): Promise<void> {
+  must({ data: true, error: (await adminClient().from(table).insert(row)).error });
+}
+
+export async function closeSession(sessionId: string): Promise<boolean> {
+  const { data, error } = await adminClient().from('study_sessions').update({ closed_at: new Date().toISOString() })
+    .eq('id', sessionId).is('closed_at', null).select('id');
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+=== lib/http.ts ===
+import { ZodError } from 'zod';
+import { HttpError } from './errors.ts';
+import { RuleError } from './domain/rules.ts';
+import { roleOf } from './services/repo.ts';
+import { userClient } from './services/supabase.ts';
+
+export function route(fn: (body: unknown, req: Request) => Promise<unknown>) {
+  return async (req: Request) => {
+    try {
+      if (!req.headers.get('content-type')?.includes('application/json')) throw new HttpError(415, 'JSON 요청만 허용됩니다');
+      const body = await req.json().catch(() => { throw new HttpError(400, '잘못된 JSON입니다'); });
+      return Response.json((await fn(body, req)) ?? { ok: true });
+    } catch (e) {
+      if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+      if (e instanceof RuleError) return Response.json({ error: e.message }, { status: 422 });
+      if (e instanceof ZodError) return Response.json({ error: e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ') }, { status: 400 });
+      console.error(e);
+      return Response.json({ error: '서버 오류가 발생했습니다' }, { status: 500 });
+    }
+  };
+}
+
+export async function requireUser() {
+  const { data, error } = await (await userClient()).auth.getUser();
+  if (error || !data.user) throw new HttpError(401, '로그인이 만료되었습니다. 다시 로그인하세요');
+  return data.user;
+}
+
+export async function requireRole(groupId: string, userId: string, role: 'host' | 'member'): Promise<void> {
+  const actual = await roleOf(groupId, userId);
+  if (!actual) throw new HttpError(403, '모임 멤버가 아닙니다');
+  if (role === 'host' && actual !== 'host') throw new HttpError(403, '방장만 할 수 있습니다');
+}
+
+=== middleware.ts ===
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
+
+export async function middleware(req: NextRequest) {
+  let res = NextResponse.next({ request: req });
+  const sb = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    cookies: {
+      getAll: () => req.cookies.getAll(),
+      setAll: (list) => {
+        list.forEach((c) => req.cookies.set(c.name, c.value));
+        res = NextResponse.next({ request: req });
+        list.forEach((c) => res.cookies.set(c.name, c.value, c.options));
+      },
+    },
+  });
+  const { error } = await sb.auth.getUser(); // refreshes an expiring session
+  if (error && error.name !== 'AuthSessionMissingError') console.warn('session refresh failed', error.message);
+  return res;
+}
+
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
+
+=== app/auth/login/route.ts ===
+import { NextResponse } from 'next/server';
+import { HttpError } from '@/lib/errors';
+import { rateLimit } from '@/lib/services/rateLimit';
+import { env, userClient } from '@/lib/services/supabase';
+
+export async function GET(req: Request) {
+  const provider = new URL(req.url).searchParams.get('provider');
+  if (provider !== 'kakao' && provider !== 'google') return NextResponse.json({ error: '지원하지 않는 로그인' }, { status: 400 });
+  try {
+    rateLimit(`login:${req.headers.get('x-forwarded-for') ?? 'unknown'}`, 10, 60_000);
+  } catch (e) {
+    if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
+  const { data, error } = await (await userClient()).auth.signInWithOAuth({
+    provider, options: { redirectTo: `${env('NEXT_PUBLIC_SITE_URL')}/auth/callback` },
+  });
+  if (error) { console.error(error); return NextResponse.redirect(`${env('NEXT_PUBLIC_SITE_URL')}/?error=login`); }
+  return NextResponse.redirect(data.url);
+}
+
+=== app/auth/callback/route.ts ===
+import { NextResponse } from 'next/server';
+import { env, userClient } from '@/lib/services/supabase';
+
+export async function GET(req: Request) {
+  const code = new URL(req.url).searchParams.get('code');
+  const site = env('NEXT_PUBLIC_SITE_URL');
+  if (!code) return NextResponse.redirect(`${site}/?error=login`);
+  const { error } = await (await userClient()).auth.exchangeCodeForSession(code);
+  if (error) { console.error(error); return NextResponse.redirect(`${site}/?error=login`); }
+  return NextResponse.redirect(site);
+}
+
+=== app/api/groups/route.ts ===
+import { randomBytes } from 'node:crypto';
+import { createGroupInput } from '@/lib/domain/inputs';
+import { requireUser, route } from '@/lib/http';
+import { rpc } from '@/lib/services/repo';
+
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from(randomBytes(8), (b) => ALPHABET[b % ALPHABET.length]).join('');
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const input = createGroupInput.parse(body);
+  const id = await rpc('create_group', {
+    p_owner: user.id, p_name: input.name, p_code: newCode(),
+    p_late: input.lateFee, p_absent: input.absentFee, p_grace: input.graceMinutes,
+  }, '이미 생성한 모임이 있습니다 (1인 1개)');
+  return { id };
+});
+
+=== app/api/groups/join/route.ts ===
+import { joinInput } from '@/lib/domain/inputs';
+import { requireUser, route } from '@/lib/http';
+import { groupByCode, insert } from '@/lib/services/repo';
+import { rateLimit } from '@/lib/services/rateLimit';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  rateLimit(`join:${user.id}`, 5, 60_000);
+  const { code } = joinInput.parse(body);
+  const group = await groupByCode(code);
+  try {
+    await insert('group_members', { group_id: group.id, user_id: user.id, role: 'member' });
+  } catch (e) {
+    if (e instanceof Error && 'status' in e && e.status === 409) return { id: group.id, already: true };
+    throw e;
+  }
+  await insert('audit_log', { group_id: group.id, actor_id: user.id, action: 'group.join', detail: {} });
+  return { id: group.id };
+});
+
+=== app/api/sessions/route.ts ===
+import { createSessionInput } from '@/lib/domain/inputs';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { insert } from '@/lib/services/repo';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const { groupId, startsAt } = createSessionInput.parse(body);
+  await requireRole(groupId, user.id, 'host');
+  await insert('study_sessions', { group_id: groupId, starts_at: startsAt, created_by: user.id });
+  await insert('audit_log', { group_id: groupId, actor_id: user.id, action: 'session.create', detail: { startsAt } });
+});
+
+=== app/api/sessions/close/route.ts ===
+import { sessionInput } from '@/lib/domain/inputs';
+import { fineFor } from '@/lib/domain/rules';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { attendedIds, closeSession, getSession, memberIds, policyOf, rpc } from '@/lib/services/repo';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const session = await getSession(sessionInput.parse(body).sessionId);
+  await requireRole(session.group_id, user.id, 'host');
+  // Closing first blocks new check-ins; the unique (session, user) key resolves any in-flight race.
+  await closeSession(session.id);
+  const [members, attended, policy] = await Promise.all([memberIds(session.group_id), attendedIds(session.id), policyOf(session.group_id)]);
+  const absent = members.filter((m) => !attended.includes(m));
+  for (const userId of absent) {
+    await rpc('record_attendance', { p_session: session.id, p_user: userId, p_status: 'absent', p_charge: fineFor('absent', policy), p_actor: user.id });
+  }
+  return { absent: absent.length };
+});
+
+=== app/api/checkin/route.ts ===
+import { sessionInput } from '@/lib/domain/inputs';
+import { classifyCheckIn, fineFor } from '@/lib/domain/rules';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { getSession, policyOf, rpc } from '@/lib/services/repo';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const session = await getSession(sessionInput.parse(body).sessionId);
+  await requireRole(session.group_id, user.id, 'member');
+  const policy = await policyOf(session.group_id);
+  const status = classifyCheckIn(new Date(), new Date(session.starts_at), session.closed_at ? new Date(session.closed_at) : null, policy.graceMinutes);
+  await rpc('record_attendance', { p_session: session.id, p_user: user.id, p_status: status, p_charge: fineFor(status, policy), p_actor: user.id }, '이미 출석했습니다');
+  return { status };
+});
+
+=== app/api/attendance/route.ts ===
+import { statusInput } from '@/lib/domain/inputs';
+import { attendanceBalance, deltaTo, fineFor } from '@/lib/domain/rules';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { getAttendance, ledger, policyOf, rpc } from '@/lib/services/repo';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const { attendanceId, status } = statusInput.parse(body);
+  const att = await getAttendance(attendanceId);
+  const groupId = att.study_sessions.group_id;
+  await requireRole(groupId, user.id, 'host');
+  const current = attendanceBalance(await ledger(groupId, att.user_id), attendanceId);
+  const delta = deltaTo(current, fineFor(status, await policyOf(groupId)));
+  await rpc('add_fine_entry', { p_group: groupId, p_user: att.user_id, p_attendance: attendanceId, p_kind: 'adjust',
+    p_amount: delta, p_reason: `상태 변경 ${att.status} → ${status}`, p_actor: user.id, p_expected: current, p_new_status: status });
+});
+
+=== app/api/fines/route.ts ===
+import { fineInput } from '@/lib/domain/inputs';
+import { attendanceBalance, deltaTo, RuleError } from '@/lib/domain/rules';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { getAttendance, ledger, rpc } from '@/lib/services/repo';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const input = fineInput.parse(body);
+  if (input.action === 'adjust' && input.amount === undefined) throw new RuleError('수정할 금액을 입력하세요');
+  const att = await getAttendance(input.attendanceId);
+  const groupId = att.study_sessions.group_id;
+  await requireRole(groupId, user.id, 'host');
+  const current = attendanceBalance(await ledger(groupId, att.user_id), att.id);
+  const delta = deltaTo(current, input.action === 'waive' ? 0 : input.amount!);
+  await rpc('add_fine_entry', { p_group: groupId, p_user: att.user_id, p_attendance: att.id, p_kind: input.action,
+    p_amount: delta, p_reason: input.reason, p_actor: user.id, p_expected: current });
+});
+
+=== app/api/payments/route.ts ===
+import { paymentInput } from '@/lib/domain/inputs';
+import { checkPayment, summarize } from '@/lib/domain/rules';
+import { requireRole, requireUser, route } from '@/lib/http';
+import { ledger, roleOf, rpc } from '@/lib/services/repo';
+import { HttpError } from '@/lib/errors';
+
+export const POST = route(async (body) => {
+  const user = await requireUser();
+  const { groupId, userId, amount } = paymentInput.parse(body);
+  await requireRole(groupId, user.id, 'host');
+  if (!(await roleOf(groupId, userId))) throw new HttpError(404, '모임 멤버가 아닙니다');
+  const [summary] = summarize(await ledger(groupId, userId), [userId]);
+  checkPayment(summary.outstanding, amount);
+  await rpc('add_fine_entry', { p_group: groupId, p_user: userId, p_attendance: null, p_kind: 'payment',
+    p_amount: amount, p_reason: '납부 기록', p_actor: user.id, p_expected: 0 });
+});
+
+=== app/globals.css ===
+@import "tailwindcss";
+
+=== app/layout.tsx ===
+import './globals.css';
+
+export const metadata = { title: '스터디 출석·벌금' };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko">
+      <body className="mx-auto max-w-3xl bg-zinc-50 p-4 text-zinc-900">{children}</body>
+    </html>
+  );
+}
+
+=== components/ApiForm.tsx ===
+'use client';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+
+type Field = { name: string; label: string; type?: 'text' | 'number' | 'datetime-local'; options?: string[] };
+
+export function ApiForm({ action, label, fields = [], hidden = {} }:
+  { action: string; label: string; fields?: Field[]; hidden?: Record<string, string> }) {
+  const router = useRouter();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    const body: Record<string, unknown> = { ...hidden };
+    new FormData(e.currentTarget).forEach((v, k) => {
+      const f = fields.find((x) => x.name === k);
+      if (v === '') return;
+      body[k] = f?.type === 'datetime-local' ? new Date(String(v)).toISOString() : v;
+    });
+    try {
+      const res = await fetch(action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.status === 401) { router.push('/?expired=1'); return; }
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? `요청 실패 (${res.status})`); return; }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '네트워크 오류');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+      {fields.map((f) => (
+        <label key={f.name} className="flex flex-col text-xs text-zinc-600">{f.label}
+          {f.options
+            ? <select name={f.name} className="rounded border px-2 py-1 text-sm">{f.options.map((o) => <option key={o}>{o}</option>)}</select>
+            : <input name={f.name} type={f.type ?? 'text'} className="rounded border px-2 py-1 text-sm" />}
+        </label>
+      ))}
+      <button disabled={busy} className="rounded bg-zinc-900 px-3 py-1 text-sm text-white disabled:opacity-50">{label}</button>
+      {error && <p role="alert" className="w-full text-sm text-red-600">{error}</p>}
+    </form>
+  );
+}
+
+=== app/page.tsx ===
+import Link from 'next/link';
+import { ApiForm } from '@/components/ApiForm';
+import { userClient } from '@/lib/services/supabase';
+
+export default async function Home({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
+  const params = await searchParams;
+  const sb = await userClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) {
+    return (
+      <main className="space-y-4">
+        <h1 className="text-xl font-bold">스터디 출석·벌금</h1>
+        {params.expired && <p className="text-sm text-red-600">로그인이 만료되었습니다. 다시 로그인하세요.</p>}
+        {params.error && <p className="text-sm text-red-600">로그인에 실패했습니다.</p>}
+        <a href="/auth/login?provider=kakao" className="block rounded bg-yellow-300 p-2 text-center">카카오로 로그인</a>
+        <a href="/auth/login?provider=google" className="block rounded border bg-white p-2 text-center">Google로 로그인</a>
+      </main>
+    );
+  }
+  const { data, error } = await sb.from('group_members').select('role, groups(id, name)').eq('user_id', user.id);
+  if (error) throw new Error(error.message);
+  const groups = (data ?? []) as unknown as { role: string; groups: { id: string; name: string } }[];
+  return (
+    <main className="space-y-6">
+      <h1 className="text-xl font-bold">내 모임</h1>
+      <ul className="space-y-1">
+        {groups.map((g) => (
+          <li key={g.groups.id}><Link className="underline" href={`/groups/${g.groups.id}`}>{g.groups.name}</Link> {g.role === 'host' && '(방장)'}</li>
+        ))}
+        {groups.length === 0 && <li className="text-sm text-zinc-500">참여한 모임이 없습니다.</li>}
+      </ul>
+      <section><h2 className="font-semibold">모임 만들기 (1인 1개)</h2>
+        <ApiForm action="/api/groups" label="만들기" fields={[{ name: 'name', label: '이름' },
+          { name: 'lateFee', label: '지각비(원)', type: 'number' }, { name: 'absentFee', label: '결석비(원)', type: 'number' },
+          { name: 'graceMinutes', label: '지각 유예(분)', type: 'number' }]} />
+      </section>
+      <section><h2 className="font-semibold">코드로 참여</h2>
+        <ApiForm action="/api/groups/join" label="참여" fields={[{ name: 'code', label: '참여 코드' }]} />
+      </section>
+    </main>
+  );
+}
+
+=== app/groups/[id]/page.tsx ===
+import { notFound, redirect } from 'next/navigation';
+import { ApiForm } from '@/components/ApiForm';
+import { attendanceBalance, summarize, type LedgerEntry } from '@/lib/domain/rules';
+import { userClient } from '@/lib/services/supabase';
+
+const KST = (iso: string) => new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+const STATUS = { present: '출석', late: '지각', absent: '결석' } as const;
+
+export default async function GroupPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const sb = await userClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) redirect('/?expired=1');
+  // RLS limits every read below to groups the user belongs to.
+  const [g, m, s, f] = await Promise.all([
+    sb.from('groups').select('name, join_code, late_fee, absent_fee, grace_minutes').eq('id', id).maybeSingle(),
+    sb.from('group_members').select('user_id, role, profiles(display_name)').eq('group_id', id),
+    sb.from('study_sessions').select('id, starts_at, closed_at, attendance(id, user_id, status)').eq('group_id', id).order('starts_at', { ascending: false }).limit(20),
+    sb.from('fine_entries').select('user_id, attendance_id, kind, amount').eq('group_id', id),
+  ]);
+  for (const r of [g, m, s, f]) if (r.error) throw new Error(r.error.message);
+  if (!g.data) notFound();
+  const members = (m.data ?? []) as unknown as { user_id: string; role: string; profiles: { display_name: string } }[];
+  const sessions = (s.data ?? []) as { id: string; starts_at: string; closed_at: string | null; attendance: { id: string; user_id: string; status: keyof typeof STATUS }[] }[];
+  const entries: LedgerEntry[] = (f.data ?? []).map((e) => ({ userId: e.user_id, attendanceId: e.attendance_id, kind: e.kind, amount: e.amount }));
+  const isHost = members.some((x) => x.user_id === user.id && x.role === 'host');
+  const nameOf = (uid: string) => members.find((x) => x.user_id === uid)?.profiles.display_name || '이름 없음';
+  const summary = summarize(entries, members.map((x) => x.user_id));
+
+  return (
+    <main className="space-y-6">
+      <h1 className="text-xl font-bold">{g.data.name}</h1>
+      <p className="text-sm text-zinc-600">지각 {g.data.late_fee}원 · 결석 {g.data.absent_fee}원 · 유예 {g.data.grace_minutes}분 · 참여 코드 <code>{g.data.join_code}</code></p>
+
+      <section><h2 className="font-semibold">벌금 정산</h2>
+        <table className="w-full text-sm"><thead><tr className="text-left"><th>멤버</th><th>누적</th><th>납부</th><th>미납</th><th>상태</th></tr></thead>
+          <tbody>{summary.map((r) => (
+            <tr key={r.userId} className="border-t"><td>{nameOf(r.userId)}</td><td>{r.fined}</td><td>{r.paid}</td><td>{r.outstanding}</td>
+              <td>{r.paidUp ? '완납' : '미납'}{isHost && !r.paidUp && <ApiForm action="/api/payments" label="납부 기록" hidden={{ groupId: id, userId: r.userId }} fields={[{ name: 'amount', label: '금액', type: 'number' }]} />}</td></tr>
+          ))}</tbody></table>
+      </section>
+
+      {isHost && <section><h2 className="font-semibold">출석 일정 만들기</h2>
+        <ApiForm action="/api/sessions" label="만들기" hidden={{ groupId: id }} fields={[{ name: 'startsAt', label: '시작 시각', type: 'datetime-local' }]} />
+      </section>}
+
+      <section className="space-y-3"><h2 className="font-semibold">출석</h2>
+        {sessions.map((ss) => (
+          <div key={ss.id} className="rounded border bg-white p-3">
+            <p className="font-medium">{KST(ss.starts_at)} {ss.closed_at && '(마감)'}</p>
+            {!ss.closed_at && <ApiForm action="/api/checkin" label="출석 체크" hidden={{ sessionId: ss.id }} />}
+            {isHost && !ss.closed_at && <ApiForm action="/api/sessions/close" label="마감(미출석자 결석 처리)" hidden={{ sessionId: ss.id }} />}
+            <ul className="mt-2 space-y-2 text-sm">{ss.attendance.map((a) => (
+              <li key={a.id}>{nameOf(a.user_id)} · {STATUS[a.status]} · 벌금 {attendanceBalance(entries, a.id)}원
+                {isHost && <div className="mt-1 space-y-1 pl-3">
+                  <ApiForm action="/api/attendance" label="상태 변경" hidden={{ attendanceId: a.id }} fields={[{ name: 'status', label: '상태', options: ['present', 'late', 'absent'] }]} />
+                  <ApiForm action="/api/fines" label="금액 수정" hidden={{ attendanceId: a.id, action: 'adjust' }} fields={[{ name: 'amount', label: '금액', type: 'number' }, { name: 'reason', label: '사유' }]} />
+                  <ApiForm action="/api/fines" label="면제" hidden={{ attendanceId: a.id, action: 'waive' }} fields={[{ name: 'reason', label: '사유' }]} />
+                </div>}
+              </li>))}</ul>
+          </div>
+        ))}
+      </section>
+    </main>
+  );
+}
+
+=== tsconfig.json ===
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["dom", "esnext"], "strict": true, "noEmit": true, "module": "esnext",
+    "moduleResolution": "bundler", "jsx": "preserve", "allowImportingTsExtensions": true, "skipLibCheck": true,
+    "esModuleInterop": true, "isolatedModules": true, "incremental": true, "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "next-env.d.ts"],
+  "exclude": ["node_modules"]
+}

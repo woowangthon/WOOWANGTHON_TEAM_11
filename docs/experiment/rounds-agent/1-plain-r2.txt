@@ -1,0 +1,691 @@
+=== package.json ===
+{
+  "name": "club-dues",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.13"
+  }
+}
+
+=== .env.example ===
+PORT=3000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-account@gmail.com
+SMTP_PASS=your-app-password
+MAIL_FROM="동아리 총무 <your-account@gmail.com>"
+# 로그인 계정: 이름:역할:비밀번호 를 쉼표로 구분. 역할은 treasurer(총무, 모든 기능) 또는 viewer(조회만)
+USERS=총무:treasurer:change-me-1,회장:viewer:change-me-2
+
+=== README.md ===
+# 동아리 회비 관리 앱
+
+회원별 회비 납부 여부를 관리하고, 미납자에게 이메일 알림을 보냅니다.
+
+## 실행
+```
+npm install
+cp .env.example .env   # SMTP 정보와 USERS(로그인 계정) 입력
+node --env-file=.env server.js
+```
+브라우저에서 http://localhost:3000 접속 후 로그인.
+
+## 기능
+- 로그인 (총무: 모든 기능 / 조회 전용 계정: 현황 보기만)
+- 회원 추가/삭제 (이름, 이메일)
+- 납부 기간(예: 2026-11) 생성, 회비 금액 설정
+- 기간별 회원 납부 여부 체크 (모든 변경은 이력으로 남고 덮어쓰지 않음)
+- 미납자 전체 또는 개별 알림 메일 발송
+- 데이터는 `data.json` 파일에 저장
+
+SMTP 설정이 없으면 메일을 실제로 보내지 않고 서버 콘솔에 내용을 출력합니다.
+
+=== db.js ===
+import fs from 'node:fs';
+import path from 'node:path';
+
+const FILE = path.resolve('data.json');
+
+const empty = () => ({ members: [], periods: [], paymentLog: [], notifications: [], nextId: 1, nextLogId: 1 });
+
+let state = load();
+
+function load() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const s = { ...empty(), ...raw };
+    // 이전 버전(payments 맵)에서 옮겨오기: 현재 상태를 최초 이력으로 기록
+    if (raw.payments && !raw.paymentLog) {
+      for (const [key, v] of Object.entries(raw.payments)) {
+        const [period, memberId] = [key.slice(0, key.lastIndexOf(':')), Number(key.slice(key.lastIndexOf(':') + 1))];
+        const amount = s.periods.find((p) => p.name === period)?.amount ?? 0;
+        s.paymentLog.push({ id: s.nextLogId++, at: v.paidAt, period, memberId, paid: true, amount, by: 'migration' });
+      }
+    }
+    delete s.payments;
+    return s;
+  } catch {
+    return empty();
+  }
+}
+
+function save() {
+  const tmp = FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, FILE);
+}
+
+export function getState() {
+  return state;
+}
+
+export function addMember(name, email) {
+  const m = { id: state.nextId++, name, email };
+  state.members.push(m);
+  save();
+  return m;
+}
+
+// 회원을 지워도 납부 이력(돈 기록)은 지우지 않는다
+export function removeMember(id) {
+  state.members = state.members.filter((m) => m.id !== id);
+  save();
+}
+
+export function addPeriod(name, amount, dueDate) {
+  if (state.periods.some((p) => p.name === name)) throw new Error('이미 있는 기간입니다');
+  const p = { name, amount, dueDate };
+  state.periods.push(p);
+  save();
+  return p;
+}
+
+// 납부 상태 변경은 덮어쓰지 않고 이력 엔트리로 추가한다 (추가 전용)
+export function recordPayment(periodName, memberId, paid, by) {
+  const period = state.periods.find((p) => p.name === periodName);
+  if (!period) throw new Error('기간 없음');
+  if (!state.members.some((m) => m.id === memberId)) throw new Error('회원 없음');
+  const entry = {
+    id: state.nextLogId++,
+    at: new Date().toISOString(),
+    period: periodName,
+    memberId,
+    paid,
+    amount: paid ? period.amount : 0,
+    by,
+  };
+  state.paymentLog.push(entry);
+  save();
+  return entry;
+}
+
+// 이력을 처음부터 따라가 현재 상태를 계산한다 (마지막 엔트리가 현재 상태)
+export function paymentStatus() {
+  const status = {};
+  for (const e of state.paymentLog) {
+    const key = `${e.period}:${e.memberId}`;
+    if (e.paid) status[key] = { paidAt: e.at, amount: e.amount, by: e.by };
+    else delete status[key];
+  }
+  return status;
+}
+
+export function paymentHistory(period, memberId) {
+  return state.paymentLog.filter((e) => e.period === period && e.memberId === memberId);
+}
+
+export function unpaidMembers(period) {
+  const status = paymentStatus();
+  return state.members.filter((m) => !status[`${period}:${m.id}`]);
+}
+
+export function logNotification(entry) {
+  state.notifications.unshift(entry);
+  state.notifications = state.notifications.slice(0, 200);
+  save();
+}
+
+=== mailer.js ===
+import nodemailer from 'nodemailer';
+
+const configured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
+
+const transport = configured
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  : null;
+
+export async function sendReminder(member, period) {
+  const subject = `[회비 안내] ${period.name} 회비 납부 요청`;
+  const text = [
+    `${member.name}님, 안녕하세요.`,
+    ``,
+    `${period.name} 동아리 회비 ${period.amount.toLocaleString()}원이 아직 확인되지 않았습니다.`,
+    period.dueDate ? `납부 기한: ${period.dueDate}` : '',
+    ``,
+    `이미 납부하셨다면 총무에게 알려주세요. 감사합니다.`,
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+
+  if (!transport) {
+    console.log(`[메일 미설정 - 콘솔 출력]\nTo: ${member.email}\nSubject: ${subject}\n${text}\n`);
+    return { simulated: true };
+  }
+  await transport.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to: member.email,
+    subject,
+    text,
+  });
+  return { simulated: false };
+}
+
+=== auth.js ===
+import crypto from 'node:crypto';
+
+// 역할별 권한. 서버가 모든 API 요청에서 이 표로 확인한다
+const PERMISSIONS = {
+  treasurer: new Set(['read', 'manage', 'remind']),
+  viewer: new Set(['read']),
+};
+const SESSION_MS = 8 * 60 * 60 * 1000;
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest();
+
+const users = (process.env.USERS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map((s) => {
+    const [name, role, ...pw] = s.split(':');
+    return { name, role, pwHash: sha256(pw.join(':')) };
+  })
+  .filter((u) => u.name && PERMISSIONS[u.role] && u.pwHash);
+
+if (!users.length) console.warn('USERS가 설정되지 않아 아무도 로그인할 수 없습니다 (.env.example 참고)');
+
+const sessions = new Map();
+
+function parseCookies(header = '') {
+  return Object.fromEntries(
+    header.split(';').map((c) => c.trim().split('=')).filter(([k, v]) => k && v).map(([k, v]) => [k, decodeURIComponent(v)]),
+  );
+}
+
+function cookie(token, maxAgeSec) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}${secure}`;
+}
+
+export function login(req, res) {
+  const name = String(req.body.name || '');
+  const given = sha256(req.body.password || '');
+  const user = users.find((u) => u.name === name);
+  // 사용자가 없어도 같은 비교를 수행해 응답 시간 차이를 줄인다
+  const ok = crypto.timingSafeEqual(given, user ? user.pwHash : sha256(crypto.randomUUID())) && Boolean(user);
+  if (!ok) return res.status(401).json({ error: '이름 또는 비밀번호가 틀렸습니다' });
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, { name: user.name, role: user.role, expires: Date.now() + SESSION_MS });
+  res.set('Set-Cookie', cookie(token, SESSION_MS / 1000));
+  res.json({ name: user.name, role: user.role });
+}
+
+export function logout(req, res) {
+  sessions.delete(parseCookies(req.headers.cookie).sid);
+  res.set('Set-Cookie', cookie('', 0));
+  res.json({ ok: true });
+}
+
+// 인증: 유효한 세션이 없으면 401
+export function authenticate(req, res, next) {
+  const token = parseCookies(req.headers.cookie).sid;
+  const s = token && sessions.get(token);
+  if (!s || s.expires < Date.now()) {
+    if (token) sessions.delete(token);
+    return res.status(401).json({ error: '로그인이 필요합니다' });
+  }
+  req.user = { name: s.name, role: s.role };
+  next();
+}
+
+// 인가: 역할에 해당 권한이 없으면 403
+export function authorize(permission) {
+  return (req, res, next) => {
+    if (!PERMISSIONS[req.user?.role]?.has(permission)) {
+      return res.status(403).json({ error: '권한이 없습니다' });
+    }
+    next();
+  };
+}
+
+export function can(role, permission) {
+  return Boolean(PERMISSIONS[role]?.has(permission));
+}
+
+=== server.js ===
+import express from 'express';
+import * as db from './db.js';
+import { sendReminder } from './mailer.js';
+import { login, logout, authenticate, authorize, can } from './auth.js';
+
+const app = express();
+app.use(express.json());
+app.use(express.static('public'));
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// 고정 윈도우 방식의 간단한 메모리 기반 요청 횟수 제한 (IP 기준)
+function rateLimit({ windowMs, max }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, v] of hits) if (now - v.start >= windowMs) hits.delete(key);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || now - entry.start >= windowMs) {
+      entry = { start: now, count: 0 };
+      hits.set(key, entry);
+    }
+    entry.count++;
+    if (entry.count > max) {
+      res.set('Retry-After', String(Math.ceil((entry.start + windowMs - now) / 1000)));
+      return res.status(429).json({ error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요' });
+    }
+    next();
+  };
+}
+
+// 외부 API(SMTP 메일 발송)를 호출하는 엔드포인트용: 10분에 5회
+const remindLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5 });
+// 로그인 엔드포인트용: 15분에 10회
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+
+app.post('/api/login', loginLimiter, login);
+app.post('/api/logout', logout);
+
+// 이 아래의 모든 /api 요청은 서버에서 로그인 여부를 확인한다
+app.use('/api', authenticate);
+
+app.get('/api/state', authorize('read'), (req, res) => {
+  const s = db.getState();
+  res.json({
+    user: { ...req.user, canManage: can(req.user.role, 'manage'), canRemind: can(req.user.role, 'remind') },
+    members: s.members,
+    periods: s.periods,
+    payments: db.paymentStatus(),
+    notifications: s.notifications.slice(0, 30),
+  });
+});
+
+app.post('/api/members', authorize('manage'), (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const email = String(req.body.email || '').trim();
+  if (!name || !EMAIL_RE.test(email)) return res.status(400).json({ error: '이름과 올바른 이메일을 입력하세요' });
+  res.json(db.addMember(name, email));
+});
+
+app.delete('/api/members/:id', authorize('manage'), (req, res) => {
+  db.removeMember(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.post('/api/periods', authorize('manage'), (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const amount = Number(req.body.amount);
+  const dueDate = String(req.body.dueDate || '');
+  if (!name || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: '기간 이름과 금액을 입력하세요' });
+  }
+  try {
+    res.json(db.addPeriod(name, amount, dueDate));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/payments', authorize('manage'), (req, res) => {
+  const { period, memberId, paid } = req.body;
+  try {
+    res.json(db.recordPayment(period, Number(memberId), Boolean(paid), req.user.name));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+app.post('/api/remind', authorize('remind'), remindLimiter, async (req, res) => {
+  const { period: periodName, memberIds } = req.body;
+  const period = db.getState().periods.find((p) => p.name === periodName);
+  if (!period) return res.status(404).json({ error: '기간 없음' });
+
+  let targets = db.unpaidMembers(period.name);
+  if (Array.isArray(memberIds) && memberIds.length) {
+    const ids = new Set(memberIds.map(Number));
+    targets = targets.filter((m) => ids.has(m.id));
+  }
+
+  const results = [];
+  for (const m of targets) {
+    try {
+      const r = await sendReminder(m, period);
+      results.push({ memberId: m.id, name: m.name, ok: true, simulated: r.simulated });
+    } catch (e) {
+      results.push({ memberId: m.id, name: m.name, ok: false, error: e.message });
+    }
+  }
+  const sent = results.filter((r) => r.ok).length;
+  db.logNotification({ at: new Date().toISOString(), period: period.name, sent, failed: results.length - sent, by: req.user.name });
+  res.json({ results });
+});
+
+const port = Number(process.env.PORT || 3000);
+app.listen(port, () => console.log(`회비 관리 앱: http://localhost:${port}`));
+
+=== docs/decisions.md ===
+# 설계 결정 기록
+
+되돌리기 어려운 설계 결정과 그 이유를 기록합니다. 결정이 바뀌면 기존 항목을 지우지 말고 새 항목을 추가하세요.
+
+## D1. 데이터 저장: 단일 JSON 파일 (`data.json`)
+- 결정: DB 없이 서버 프로세스 메모리 + JSON 파일에 저장 (임시 파일 쓰기 후 rename)
+- 이유: 동아리 규모(수십~수백 명)에서 설치·운영 부담이 가장 적음
+- 대가: 서버 인스턴스 1개만 가능, 동시 쓰기·대규모 데이터에 부적합. 나중에 DB로 옮기려면 마이그레이션 스크립트 필요
+
+## D2. 납부 기록 키: `기간이름:회원ID`
+- 결정: 납부 기간은 이름(예: `2026-11`)을 식별자로 사용하고, 납부 기록은 `기간:회원ID` 키로 저장
+- 이유: 구조가 단순하고 화면에서 바로 읽힘
+- 대가: 기간 이름을 바꾸면 기존 납부 기록과 연결이 끊김. 기간 이름 변경 기능은 제공하지 않음
+
+## D3. 회원 삭제 시 납부 기록도 삭제 (D7로 대체됨)
+- 결정: 회원을 삭제하면 해당 회원의 모든 납부 기록을 함께 지움
+- 대가: 삭제 후 과거 납부 내역 복구 불가 (백업은 `data.json` 복사로 직접)
+
+## D4. 알림 채널: 이메일(SMTP)
+- 결정: 미납 알림은 nodemailer를 통한 이메일로만 발송. SMTP 미설정 시 서버 콘솔 출력으로 대체하고 화면에 그 사실을 표시
+- 이유: 별도 유료 서비스 없이 사용 가능
+- 대가: 카카오톡/문자 알림은 미지원. 추가하려면 `mailer.js`와 같은 형태의 발송 모듈을 새로 작성해야 함
+
+## D5. 인증 없음 (D8로 대체됨)
+- 결정: 현재 로그인 기능이 없고, 앱은 총무 개인 PC나 내부망에서 실행한다고 가정
+- 대가: 외부에 공개 배포하면 누구나 회원 정보 조회·수정·알림 발송 가능. 공개 배포 전 인증 추가 필수
+
+## D6. 요청 횟수 제한: 메모리 기반, IP 기준
+- 결정: 외부 API(메일 발송)를 호출하는 `/api/remind`에 IP당 10분 5회 제한. 외부 패키지 없이 메모리에서 계산
+- 대가: 서버 재시작 시 카운트 초기화, 서버 여러 대로 늘리면 공유되지 않음. 리버스 프록시 뒤에 두면 `app.set('trust proxy', ...)` 설정이 필요
+
+## D7. 납부 기록은 추가 전용 이력 (`paymentLog`)
+- 결정: 납부/취소는 덮어쓰지 않고 `{시각, 기간, 회원, 납부여부, 금액, 처리자}` 엔트리를 추가. 현재 상태는 이력을 순서대로 따라가 계산. 회원을 삭제해도 이력은 남김
+- 이유: 돈이 걸린 데이터라 누가 언제 무엇을 바꿨는지 추적 가능해야 함
+- 대가: 이력은 계속 늘어남(동아리 규모에선 문제 없음). 잘못 입력해도 지울 수 없고 반대 엔트리로 바로잡아야 함. 이전 `payments` 형식 데이터는 처음 읽을 때 `by: migration` 엔트리로 옮김
+
+## D8. 인증: 환경변수 계정 + 서버 세션 + 역할 권한
+- 결정: `USERS` 환경변수의 계정으로 로그인, 서버 메모리 세션(HttpOnly·SameSite=Strict 쿠키, 8시간). 로그인 외 모든 `/api` 요청에서 서버가 세션과 역할 권한(treasurer: 조회·관리·알림 / viewer: 조회)을 확인. 로그인에도 IP당 15분 10회 제한
+- 대가: 서버 재시작 시 모두 로그아웃됨. 계정 추가·비밀번호 변경은 환경변수 수정 후 재시작 필요. 회원 본인 로그인(자기 납부 내역 보기)은 미지원
+
+=== public/login.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>로그인 - 동아리 회비 관리</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>동아리 회비 관리</h1>
+    <section>
+      <h2>로그인</h2>
+      <form id="login-form">
+        <input name="name" placeholder="이름" autocomplete="username" required />
+        <input name="password" type="password" placeholder="비밀번호" autocomplete="current-password" required />
+        <button>로그인</button>
+      </form>
+      <p id="status" role="status"></p>
+    </section>
+  </main>
+  <script>
+    document.getElementById('login-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(e.target))),
+      });
+      if (res.ok) return location.replace('/');
+      const data = await res.json().catch(() => ({}));
+      document.getElementById('status').textContent = data.error || '로그인 실패';
+    };
+  </script>
+</body>
+</html>
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>동아리 회비 관리</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>동아리 회비 관리</h1>
+    <p><span id="who"></span> <button id="logout">로그아웃</button></p>
+
+    <section class="manage">
+      <h2>회원</h2>
+      <form id="member-form">
+        <input name="name" placeholder="이름" required />
+        <input name="email" type="email" placeholder="이메일" required />
+        <button>추가</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>납부 기간</h2>
+      <form id="period-form" class="manage">
+        <input name="name" placeholder="예: 2026-11" required />
+        <input name="amount" type="number" min="1" placeholder="금액(원)" required />
+        <input name="dueDate" type="date" />
+        <button>생성</button>
+      </form>
+      <label>현재 기간
+        <select id="period-select"></select>
+      </label>
+      <p id="summary"></p>
+    </section>
+
+    <section>
+      <h2>납부 현황</h2>
+      <table>
+        <thead><tr><th>이름</th><th>이메일</th><th>납부</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <button id="remind-all">미납자 전체에게 알림 보내기</button>
+      <p id="status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>알림 기록</h2>
+      <ul id="log"></ul>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/style.css ===
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f6; color: #222; }
+main { max-width: 760px; margin: 0 auto; padding: 16px; }
+section { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+input, select, button { padding: 6px 10px; font-size: 14px; }
+button { cursor: pointer; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+tr.unpaid td:first-child { color: #c0392b; font-weight: 600; }
+#status { color: #555; }
+.hidden { display: none; }
+
+=== public/app.js ===
+let state = { user: null, members: [], periods: [], payments: {}, notifications: [] };
+let current = '';
+
+const $ = (id) => document.getElementById(id);
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) {
+    location.replace('/login.html');
+    throw new Error('로그인이 필요합니다');
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '요청 실패');
+  return data;
+}
+
+async function refresh() {
+  state = await api('GET', '/api/state');
+  if (!state.periods.some((p) => p.name === current)) {
+    current = state.periods.at(-1)?.name || '';
+  }
+  render();
+}
+
+function el(tag, text) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function render() {
+  const { canManage, canRemind } = state.user;
+  $('who').textContent = `${state.user.name} (${canManage ? '총무' : '조회 전용'})`;
+  // 화면에서 숨기는 것은 편의일 뿐, 실제 권한 확인은 서버가 한다
+  document.querySelectorAll('.manage').forEach((n) => n.classList.toggle('hidden', !canManage));
+
+  const sel = $('period-select');
+  sel.replaceChildren(...state.periods.map((p) => {
+    const o = el('option', `${p.name} (${p.amount.toLocaleString()}원)`);
+    o.value = p.name;
+    o.selected = p.name === current;
+    return o;
+  }));
+
+  const rows = $('rows');
+  rows.replaceChildren();
+  let paidCount = 0;
+  for (const m of state.members) {
+    const paid = Boolean(state.payments[`${current}:${m.id}`]);
+    if (paid) paidCount++;
+    const tr = el('tr');
+    if (!paid) tr.className = 'unpaid';
+    tr.append(el('td', m.name), el('td', m.email));
+
+    const tdPaid = el('td');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = paid;
+    cb.disabled = !current || !canManage;
+    cb.onchange = async () => {
+      try {
+        await api('PUT', '/api/payments', { period: current, memberId: m.id, paid: cb.checked });
+      } catch (e) { alert(e.message); }
+      refresh();
+    };
+    tdPaid.append(cb);
+
+    const tdAct = el('td');
+    if (!paid && current && canRemind) {
+      const b = el('button', '알림');
+      b.onclick = () => remind([m.id]);
+      tdAct.append(b);
+    }
+    if (canManage) {
+      const del = el('button', '삭제');
+      del.onclick = async () => {
+        if (!confirm(`${m.name} 회원을 삭제할까요? (납부 이력은 남습니다)`)) return;
+        await api('DELETE', `/api/members/${m.id}`);
+        refresh();
+      };
+      tdAct.append(del);
+    }
+    tr.append(tdPaid, tdAct);
+    rows.append(tr);
+  }
+
+  $('summary').textContent = current
+    ? `납부 ${paidCount}명 / 미납 ${state.members.length - paidCount}명`
+    : '납부 기간을 먼저 생성하세요.';
+  $('remind-all').classList.toggle('hidden', !canRemind);
+  $('remind-all').disabled = !current || paidCount === state.members.length;
+
+  $('log').replaceChildren(...state.notifications.map((n) =>
+    el('li', `${new Date(n.at).toLocaleString()} · ${n.period} · 발송 ${n.sent}건${n.failed ? `, 실패 ${n.failed}건` : ''}${n.by ? ` · ${n.by}` : ''}`)));
+}
+
+async function remind(memberIds) {
+  $('status').textContent = '발송 중...';
+  try {
+    const { results } = await api('POST', '/api/remind', { period: current, memberIds });
+    const ok = results.filter((r) => r.ok);
+    const sim = ok.some((r) => r.simulated) ? ' (메일 미설정: 서버 콘솔에만 출력됨)' : '';
+    const fail = results.filter((r) => !r.ok).map((r) => r.name);
+    $('status').textContent = `${ok.length}명에게 알림 발송${sim}` + (fail.length ? ` / 실패: ${fail.join(', ')}` : '');
+  } catch (e) {
+    $('status').textContent = e.message;
+  }
+  refresh();
+}
+
+$('member-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api('POST', '/api/members', Object.fromEntries(f));
+    e.target.reset();
+    refresh();
+  } catch (err) { alert(err.message); }
+};
+
+$('period-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  try {
+    await api('POST', '/api/periods', f);
+    current = f.name;
+    e.target.reset();
+    refresh();
+  } catch (err) { alert(err.message); }
+};
+
+$('period-select').onchange = (e) => { current = e.target.value; render(); };
+$('remind-all').onclick = () => remind();
+$('logout').onclick = async () => {
+  await fetch('/api/logout', { method: 'POST' });
+  location.replace('/login.html');
+};
+
+refresh();
+
+변경 사항
+1. [돈이 걸린 데이터는 기록으로 남기기] db.js: payments 맵 덮어쓰기/삭제를 없애고 추가 전용 paymentLog(시각·기간·회원·납부여부·금액·처리자)로 기록, 현재 상태는 paymentStatus()로 이력에서 계산, 회원 삭제 시에도 이력 유지, 기존 data.json은 migration 엔트리로 변환 (server.js는 recordPayment/paymentStatus 호출로 맞춤, decisions.md에 D7 추가).
+2. [권한은 서버에서 확인] auth.js 신규(USERS 환경변수 계정, HttpOnly 세션 쿠키, 역할별 권한표) + server.js에서 로그인 외 모든 /api 요청에 authenticate(401), 라우트마다 authorize(read/manage/remind, 403) 적용, 로그인에 rate limit 적용; 로그인 화면(login.html)과 401 시 이동·권한별 버튼 숨김을 프론트에 추가 (.env.example, README, decisions.md D8 갱신).
