@@ -1,5 +1,8 @@
-import { TIERS } from './types.ts';
-import type { Feasibility, Tier } from './types.ts';
+import { GOALS, TIERS } from './types.ts';
+import type { Feasibility, Goal, Tier } from './types.ts';
+
+// Said in so many words: selling it, charging for it. "판매" alone is not enough ("판매글 정리 앱").
+const COMMERCIAL = /상업\s?용|유료|판매\s?(예정|할|하려|목적|용)|팔\s?(예정|거|려고)|수익\s?화|과금|돈\s?(받고|벌)/;
 
 // The worst outcome for a beginner is starting a project far bigger than it looks and abandoning
 // it halfway. A small model can call a crypto exchange "a simple web app", so for domains where
@@ -30,9 +33,21 @@ const FLOORS: { pattern: RegExp; tier: Tier; reason: string }[] = [
     tier: 'team',
     reason: '실제 돈이 오가는 결제·주문은 환불·정산·분쟁 처리까지 만들어야 해서 생각보다 훨씬 큽니다.',
   },
+  {
+    pattern: COMMERCIAL,
+    tier: 'team',
+    reason: '돈을 받고 팔면 만드는 것 외에 결제·환불, 라이선스·이용약관, 고객 문의, 업데이트 배포까지 따라옵니다.',
+  },
 ];
 
 const rank = (t: Tier) => TIERS.indexOf(t);
+
+/** The goal the request states outright, when it does; otherwise the AI's reading stands. */
+export function statedGoal(request: string): Goal | null {
+  if (COMMERCIAL.test(request)) return 'commercial';
+  if (/오픈\s?소스|open\s?source|누구나\s?(쓰|수정|사용)|공개\s?(배포|서비스)/i.test(request)) return 'public';
+  return null;
+}
 
 /** The highest tier a rule demands for this request, or null when no rule applies. */
 export function tierFloor(request: string): { tier: Tier; reason: string } | null {
@@ -43,18 +58,23 @@ export function tierFloor(request: string): { tier: Tier; reason: string } | nul
   return best;
 }
 
-/** The AI's verdict, never lower than the rule floor. Raising it is recorded so the screen can say so. */
+/**
+ * The AI's verdict, never lower than the rule floor, and with the goal the request states outright.
+ * Raising the tier is recorded so the screen can say so.
+ */
 export function applyFloor(f: Feasibility, request: string): Feasibility {
+  const goal = statedGoal(request) ?? f.goal;
   const floor = tierFloor(request);
-  if (!floor || rank(floor.tier) <= rank(f.tier)) return f;
-  return { ...f, tier: floor.tier, raisedBy: floor.reason };
+  if (!floor || rank(floor.tier) <= rank(f.tier)) return { ...f, goal };
+  return { ...f, goal, tier: floor.tier, raisedBy: floor.reason };
 }
 
 /** When the AI gave nothing: only what the rule knows, never an invented app-specific verdict. */
 export function ruleFeasibility(request: string): Feasibility | null {
   const floor = tierFloor(request);
   if (!floor) return null;
-  return { tier: floor.tier, why: floor.reason, risks: [], scopeDown: '', raisedBy: null, by: 'rule' };
+  const goal = statedGoal(request) ?? 'personal';
+  return { goal, tier: floor.tier, why: floor.reason, risks: [], goalAdds: [], scopeDown: '', raisedBy: null, by: 'rule' };
 }
 
 /** A malformed verdict is dropped (null), not allowed to sink the cards it came with. */
@@ -65,6 +85,16 @@ export function parseFeasibility(raw: unknown): Feasibility | null {
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
   const why = text(o.why, 300);
   if (!why) return null;
-  const risks = Array.isArray(o.risks) ? o.risks.map((r) => text(r, 80)).filter(Boolean).slice(0, 3) : [];
-  return { tier: o.tier as Tier, why, risks, scopeDown: text(o.scopeDown, 200), raisedBy: null, by: 'ai' };
+  const list = (v: unknown, n: number) => (Array.isArray(v) ? v.map((r) => text(r, 80)).filter(Boolean).slice(0, n) : []);
+  const goal = GOALS.includes(o.goal as Goal) ? (o.goal as Goal) : 'personal';
+  return {
+    goal,
+    tier: o.tier as Tier,
+    why,
+    risks: list(o.risks, 3),
+    goalAdds: goal === 'personal' ? [] : list(o.goalAdds, 4),
+    scopeDown: text(o.scopeDown, 200),
+    raisedBy: null,
+    by: 'ai',
+  };
 }
