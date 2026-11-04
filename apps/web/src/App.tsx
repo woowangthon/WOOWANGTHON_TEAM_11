@@ -100,6 +100,13 @@ export function App() {
       setStep('spec');
     });
 
+  // Only the translation is redone: the plan and cards stay as they were, so nothing else shifts.
+  const retranslate = () =>
+    run(async () => {
+      if (!spec) return;
+      setSpec({ ...spec, translation: await fetchTranslate(translatableTexts(spec.input)) });
+    });
+
   // Any change to what the spec was built from makes it stale; it must be generated again.
   const edit = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v);
@@ -158,6 +165,8 @@ export function App() {
               profile={profile}
               onBack={() => setStep('rules')}
               onReview={() => setStep('board')}
+              onRetranslate={retranslate}
+              retranslating={busy}
             />
           )}
           {step === 'board' && spec && (

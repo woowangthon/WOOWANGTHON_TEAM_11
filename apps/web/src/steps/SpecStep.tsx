@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, ArrowRight, Copy, Download, FileText, Gauge, Languages, ShieldAlert, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Download, FileText, Gauge, Languages, RefreshCw, ShieldAlert, Wallet } from 'lucide-react';
 import { buildSpec, estimateTokens, securityChecksFor, withTexts } from '@spec/core';
 import type { Card, CardsData, Generated, Plan, Profile, SpecInput, SpecLang } from '@spec/core';
 import type { TranslateResult } from '../api.ts';
@@ -20,6 +20,8 @@ interface Props {
   profile: Profile;
   onBack: () => void;
   onReview: () => void;
+  onRetranslate: () => void;
+  retranslating: boolean;
 }
 
 function download(name: string, text: string) {
@@ -29,7 +31,7 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-export function SpecStep({ input, translation, cardsResult, tasksResult, profile, onBack, onReview }: Props) {
+export function SpecStep({ input, translation, cardsResult, tasksResult, profile, onBack, onReview, onRetranslate, retranslating }: Props) {
   const [tab, setTab] = useState<Tab>('spec');
   const [lang, setLang] = useState<SpecLang>('en');
   const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
@@ -81,8 +83,17 @@ export function SpecStep({ input, translation, cardsResult, tasksResult, profile
             코딩 AI에게는 <b>영어본</b>을 주세요. 영어 지시를 가장 정확히 따르고 토큰도 덜 씁니다. 한국어본은 확인용입니다.
             프로젝트 폴더에 <b>CLAUDE.md</b>(Claude Code) 또는 <b>AGENTS.md</b>(Codex·Cursor 등)로 두면 코딩 AI가 매번 읽습니다.
           </p>
-          {translation.source === 'fallback' && (
-            <p className="Note">번역에 실패해서 영어본에도 한국어 문장이 남아 있습니다. 그대로 써도 동작합니다.</p>
+          {translation.untranslated > 0 && (
+            <div className="Error" role="note">
+              <AlertTriangle size={13} />
+              {translation.source === 'fallback'
+                ? ` 번역에 실패해서 영어본에 한국어 문장 ${translation.untranslated}줄이 남아 있습니다.`
+                : ` 영어본에 번역되지 않은 한국어 문장 ${translation.untranslated}줄이 남아 있습니다.`}
+              {' '}그대로 써도 동작하지만, 코딩 AI는 영어 지시를 더 정확히 따릅니다.
+              <button className="Btn" onClick={onRetranslate} disabled={retranslating}>
+                <RefreshCw size={13} /> {retranslating ? '번역 중…' : '번역 다시 시도'}
+              </button>
+            </div>
           )}
           <div className="Row">
             <div className="Tabs" role="tablist">

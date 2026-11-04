@@ -2,7 +2,10 @@ import { chatJson, extractJson } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import type { Source } from './types.ts';
 
-export const MAX_TRANSLATE_LINES = 80;
+// A full plan (nine decisions, eight tasks with watch-outs and checks, the stack) runs past 80 texts;
+// at the old limit of 80 a big spec was refused outright instead of translated.
+export const MAX_TRANSLATE_LINES = 200;
+const HANGUL = /[가-힣]/;
 const MAX_LINE_CHARS = 2000;
 
 const SYSTEM = `Translate each Korean string to concise, plain English for a software developer.
@@ -19,24 +22,49 @@ export function validateLines(raw: unknown): string[] {
   });
 }
 
-/**
- * One call for the whole spec. On failure the Korean lines come back unchanged with
- * source 'fallback', so the spec is still usable and the UI says it was not translated.
- */
-export async function translateToEnglish(
-  llm: LlmConfig,
-  lines: string[],
-): Promise<{ lines: string[]; source: Source; model: string | null; error: string | null }> {
-  try {
-    const res = await chatJson(llm, SYSTEM, JSON.stringify({ lines }));
-    const out = (extractJson(res.text) as { lines?: unknown }).lines;
-    if (!Array.isArray(out) || out.length !== lines.length) {
-      throw new Error(`translation returned ${Array.isArray(out) ? out.length : 'no'} lines for ${lines.length}`);
-    }
-    // Empty in, empty out: a model that fills a blank summary would add text nobody wrote.
-    const translated = out.map((l, i) => (lines[i].trim() === '' ? '' : String(l)));
-    return { lines: translated, source: 'ai', model: res.model, error: null };
-  } catch (err) {
-    return { lines, source: 'fallback', model: null, error: (err as Error).message };
+async function translateOnce(llm: LlmConfig, lines: string[]): Promise<{ lines: string[]; model: string }> {
+  const res = await chatJson(llm, SYSTEM, JSON.stringify({ lines }));
+  const out = (extractJson(res.text) as { lines?: unknown }).lines;
+  if (!Array.isArray(out) || out.length !== lines.length) {
+    throw new Error(`translation returned ${Array.isArray(out) ? out.length : 'no'} lines for ${lines.length}`);
   }
+  // Empty in, empty out: a model that fills a blank summary would add text nobody wrote.
+  return { lines: out.map((l, i) => (lines[i].trim() === '' ? '' : String(l))), model: res.model };
+}
+
+export interface TranslateResult {
+  lines: string[];
+  source: Source;
+  model: string | null;
+  error: string | null;
+  /** How many lines are still Korean after the retry. Shown, so a half-English spec is never silent. */
+  untranslated: number;
+}
+
+/**
+ * One call for the whole spec, then one more for any line the model handed back still in Korean
+ * (it does that now and then, and the line count still matches, so nothing used to notice).
+ * On failure the Korean lines come back unchanged with source 'fallback'; the spec still works
+ * and the UI says it was not translated.
+ */
+export async function translateToEnglish(llm: LlmConfig, lines: string[]): Promise<TranslateResult> {
+  let first: { lines: string[]; model: string };
+  try {
+    first = await translateOnce(llm, lines);
+  } catch (err) {
+    const untranslated = lines.filter((l) => HANGUL.test(l)).length;
+    return { lines, source: 'fallback', model: null, error: (err as Error).message, untranslated };
+  }
+  const out = [...first.lines];
+  const left = out.flatMap((l, i) => (HANGUL.test(l) ? [i] : []));
+  if (left.length > 0) {
+    try {
+      const again = await translateOnce(llm, left.map((i) => lines[i]));
+      left.forEach((i, k) => { out[i] = again.lines[k]; });
+    } catch {
+      // The first pass stands; what is still Korean is counted below and shown.
+    }
+  }
+  const untranslated = out.filter((l) => HANGUL.test(l)).length;
+  return { lines: out, source: 'ai', model: first.model, error: null, untranslated };
 }
