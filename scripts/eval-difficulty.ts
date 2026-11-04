@@ -27,6 +27,9 @@ const CASES: { request: string; expected: Tier }[] = [
   { request: '동아리 출석체크 앱', expected: 'personal' },
   { request: '혼자 쓰는 가계부', expected: 'personal' },
   { request: '깃허브 이슈 들어오면 라벨 추천해주는 내 오픈소스용 봇', expected: 'personal' },
+  // The owner's own test (#25): the same tool, judged differently once the goal differs.
+  { request: '오픈소스 mv 만들기용 애니메이션 제작 툴. 개인용 테스트 가능하며 상업용 판매 예정', expected: 'team' },
+  { request: '오픈소스 mv 만들기용 애니메이션 제작 툴. 개인 사용 및 오픈소스로 누구나 수정가능하게 하는 수준', expected: 'personal' },
 ];
 
 mkdirSync(OUT, { recursive: true });
@@ -49,7 +52,7 @@ for (const c of CASES) {
   raw.push({ ...c, own, final });
   console.log(`${c.request} → AI ${own?.tier ?? '-'} / final ${final?.tier ?? '-'} (expected ${c.expected})`);
   rows.push(
-    `| ${c.request} | ${c.expected} | ${own?.tier ?? '(실패)'} | ${final?.tier ?? '-'}${final?.raisedBy ? ' (규칙으로 올림)' : ''} | ${(own?.why ?? '').replace(/\|/g, '/')} |`,
+    `| ${c.request} | ${c.expected} | ${own?.tier ?? '(실패)'} | ${final?.tier ?? '-'}${final?.raisedBy ? ' (규칙으로 올림)' : ''} | ${final?.goal ?? '-'} | ${(final?.why ?? '').replace(/\|/g, '/')} |`,
   );
 }
 
@@ -63,8 +66,8 @@ writeFileSync(
 - AI 단독 = 규칙 적용 전 AI 판정, 최종 = 화면에 나가는 판정 (규칙 바닥 적용 후). 두 번 호출이라 서로 다를 수 있음
 - AI 단독 일치 ${aiHit}/${CASES.length}, 최종 일치 ${finalHit}/${CASES.length}
 
-| 요청 | 기대 | AI 단독 | 최종 | AI가 든 이유 |
-|---|---|---|---|---|
+| 요청 | 기대 | AI 단독 | 최종 | 목적 | 화면에 나간 이유 |
+|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 ## 한계
