@@ -60,7 +60,7 @@ Return JSON only:
  "budget": {"freeTier": "full" | "partial" | "none", "assumedScale": string, "monthly": string, "summary": string,
             "items": [{"name": string, "free": string, "paid": string}]},
  "securityFocus": [{"what": string, "steps": [string]}],
- "skills": [{"id": string, "reason": string}]}
+ "skills": [{"id": string, "reason": string}]}   (skills are objects with both fields, never bare id strings)
 - 4 to 10 tasks, smallest working version first, each finishable in one session.
 - "title" is an imperative instruction in Korean. "done" is a checkable completion condition in Korean.
 - "difficulty" estimates how hard the task is for a non-developer working with an AI coding agent; "reason" explains concretely why, in one or two Korean sentences.
@@ -71,7 +71,7 @@ Return JSON only:
 - "securityChecks": SECURITY ONLY, usually empty. Include an item only when this task creates a real security or privacy risk that a non-developer must verify by hand because the AI cannot be trusted to judge it (a secret committed or exposed, personal data visible to others, money handled wrongly). Never include ordinary "does the feature work" checks. "how" gives concrete steps a non-developer can follow, in Korean.
 - "budget": a realistic running-cost estimate for this app with the recommended stack, at the scale the owner described in the request, notes and decisions (for example "대규모 트래픽" means thousands of users or more, which is beyond free tiers). Only when nothing indicates scale, assume about 100 users. "assumedScale" states the scale you assumed in Korean. "freeTier" says whether it can run entirely on free tiers at that scale. "monthly" is a KRW range. "items" lists each paid-capable service with what its free tier covers and what it costs at that scale, in Korean. "summary" says in one Korean sentence how far the free tier goes and what pushes it to paid.
 - "securityFocus": 2 to 4 security or privacy checks specific to THIS app's data and rules (e.g. for a fine-tracking app: "다른 회원의 벌금 금액을 바꿀 수 없는지"), not generic advice. "steps" are 2 to 4 concrete steps a non-developer can do in the running app or the repository, in Korean.
-- "skills": pick 2 to 4 from this catalog only (use the exact id) that fit this project best, with "reason" in one Korean sentence about this project:
+- "skills": pick 1 to 4 from this catalog only (use the exact id); [] only if truly nothing in it fits. Prefer skills for this app's own domain (its payments, database, platform, money rules, release goal) over general process skills; pick a general one only when it clearly helps a specific task. Do not pad with general skills to reach four. "reason" is one Korean sentence naming which task in your plan it helps and what it prevents there (e.g. "작업 4 결제 연동에서 웹훅 검증 누락을 막음"):
 ${SKILLS.map((s) => `  - ${s.id}: ${s.what}`).join('\n')}
 - 3 to 6 stack items: "area" in Korean (e.g. 화면, 데이터 저장, 로그인, 배포), "choice" a concrete product or library name, "why" its role in this app in one Korean sentence, "connects" how it works with the other picks in one Korean sentence. Prefer free-tier, widely used options that coding agents know well.
 - One tool per responsibility. If the database provider also offers login (e.g. Supabase, Firebase), either use it for login or say in "connects" why a separate login library is used and which one owns user identity and data permissions.

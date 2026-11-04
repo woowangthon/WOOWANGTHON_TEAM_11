@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_PROFILE, calibrateDifficulty, fallbackBudget, parsePlan, recommendRules } from '../src/index.ts';
+import { DEFAULT_PROFILE, MAX_SKILLS, calibrateDifficulty, fallbackBudget, mergeSkills, parsePlan, recommendRules } from '../src/index.ts';
 import type { Task } from '../src/index.ts';
 
 const task = (title: string, difficulty: Task['difficulty']): Task => ({ title, done: '', difficulty, reason: 'r', watchouts: [], securityChecks: [] });
@@ -37,4 +37,20 @@ test('skill picks only come from the vetted catalog; focus checks need steps', (
 test('a skill named by its display name is still recognised', () => {
   const plan = parsePlan({ tasks: [{ title: 't', difficulty: 'easy' }], skills: [{ id: 'test-driven-development', reason: 'r' }, { name: 'ponytail', reason: 'p' }] });
   assert.deepEqual(plan.skills.map((s) => s.id), ['tdd', 'ponytail']);
+});
+
+test('bare skill ids are kept, not dropped', () => {
+  // Seen from Flash-Lite on 11/4: every pick vanished and the screen showed the generic list.
+  const plan = parsePlan({ tasks: [{ title: 't', difficulty: 'easy' }], skills: ['stripe-best-practices', 'nope'] });
+  assert.deepEqual(plan.skills, [{ id: 'stripe-best-practices', reason: '' }]);
+});
+
+test('a domain skill the profile calls for is added when the AI left it out, and listed first', () => {
+  const shown = mergeSkills([{ id: 'writing-plans', reason: '' }], { ...DEFAULT_PROFILE, payment: 'yes', money: 'yes' });
+  assert.equal(shown[0].skill.id, 'stripe-best-practices');
+  assert.equal(shown[0].by, 'rule');
+  const plans = shown.find((s) => s.skill.id === 'writing-plans');
+  assert.equal(plans?.by, 'ai');
+  assert.ok(plans?.reason, 'an AI pick without a reason still says something');
+  assert.ok(shown.length <= MAX_SKILLS);
 });

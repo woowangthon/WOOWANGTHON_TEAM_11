@@ -189,7 +189,9 @@ function parseSkillPicks(raw: unknown): SkillPick[] {
   const byKey = new Map(SKILLS.flatMap((s) => [[s.id.toLowerCase(), s.id], [s.name.toLowerCase(), s.id]] as const));
   const seen = new Set<string>();
   return (Array.isArray(raw) ? raw : []).flatMap((p): SkillPick[] => {
-    const item = p as Record<string, unknown>;
+    // Flash-Lite sometimes answers with bare ids (["tdd", ...]); those used to be dropped, so the
+    // AI's picks vanished and the screen fell back to the generic list without saying why.
+    const item = (typeof p === 'string' ? { id: p } : p) as Record<string, unknown>;
     const id = byKey.get(text(item?.id ?? item?.name, 60).toLowerCase());
     if (!id || seen.has(id)) return [];
     seen.add(id);
