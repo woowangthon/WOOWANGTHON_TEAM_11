@@ -1,5 +1,5 @@
 import { FALLBACK_CARDS, MAX_CARDS, parseCards } from './cards.ts';
-import { chatJson, extractJson } from './llm.ts';
+import { chatParsed } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import { CARDS_SYSTEM, TASKS_SYSTEM, cardsUser, tasksUser } from './prompts.ts';
 import type { ChosenFeatures } from './features.ts';
@@ -38,8 +38,8 @@ export async function generateCards(
   request: string,
 ): Promise<Generated<CardsData>> {
   try {
-    const res = await chatJson(llm, CARDS_SYSTEM, cardsUser(request));
-    const data = parseCards(extractJson(res.text));
+    const res = await chatParsed(llm, CARDS_SYSTEM, cardsUser(request), parseCards);
+    const data = res.data;
     const feasibility = data.feasibility ? applyFloor(data.feasibility, request) : ruleFeasibility(request);
     return { data: { ...data, feasibility }, source: 'ai', model: res.model, error: null };
   } catch (err) {
@@ -60,8 +60,8 @@ export async function generateTasks(
   features: ChosenFeatures = { now: [], later: [] },
 ): Promise<Generated<Plan>> {
   try {
-    const res = await chatJson(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules, profile, features));
-    return { data: parsePlan(extractJson(res.text)), source: 'ai', model: res.model, error: null };
+    const res = await chatParsed(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules, profile, features), parsePlan);
+    return { data: res.data, source: 'ai', model: res.model, error: null };
   } catch (err) {
     return { data: fallbackPlan(profile), source: 'fallback', model: null, error: (err as Error).message };
   }

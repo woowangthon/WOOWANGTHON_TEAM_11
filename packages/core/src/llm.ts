@@ -135,6 +135,30 @@ async function chatAnthropic(config: LlmConfig, system: string, user: string): P
   throw new LlmError('all models failed', attempts);
 }
 
+/**
+ * chatJson plus parsing, asking once more when the answer does not parse or validate. Flash-Lite
+ * now and then sends broken JSON and is fine on the next call; before this, one bad answer sent
+ * the whole step to its fixed fallback (seen 1 in 9 in the size check, 11/4). Network and quota
+ * failures are not retried here: chatJson has already gone through every model for those.
+ */
+export async function chatParsed<T>(
+  config: LlmConfig,
+  system: string,
+  user: string,
+  parse: (raw: unknown) => T,
+): Promise<{ data: T; model: string }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await chatJson(config, system, user);
+    try {
+      return { data: parse(extractJson(res.text)), model: res.model };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 /** Models sometimes wrap JSON in a code fence even when asked not to. */
 export function extractJson(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
