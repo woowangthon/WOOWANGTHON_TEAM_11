@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_PROFILE, MAX_SKILLS, calibrateDifficulty, fallbackBudget, mergeSkills, parsePlan, recommendRules } from '../src/index.ts';
+import { DEFAULT_PROFILE, MAX_SKILLS, calibrateBudget, calibrateDifficulty, fallbackBudget, maxMonthlyKrw, mergeSkills, parsePlan, recommendRules } from '../src/index.ts';
 import type { Task } from '../src/index.ts';
 
 const task = (title: string, difficulty: Task['difficulty']): Task => ({ title, done: '', difficulty, reason: 'r', watchouts: [], securityChecks: [] });
@@ -53,4 +53,26 @@ test('a domain skill the profile calls for is added when the AI left it out, and
   assert.equal(plans?.by, 'ai');
   assert.ok(plans?.reason, 'an AI pick without a reason still says something');
   assert.ok(shown.length <= MAX_SKILLS);
+});
+
+// The owner's test (#36): an AI-image detector on its own server came back as 1~4만원 a month.
+test('a self-hosted model with a tiny estimate is flagged, the AI figure kept', () => {
+  const budget = { freeTier: 'partial' as const, assumedScale: '100명', monthly: '1만원~4만원', summary: 's', items: [] };
+  const flagged = calibrateBudget(budget, 'How to classify? → Deploy open-source AI models on our own server');
+  assert.equal(flagged.monthly, '1만원~4만원');
+  assert.equal(flagged.freeTier, 'none');
+  assert.match(flagged.ruleNote ?? '', /GPU/);
+  assert.equal(calibrateBudget({ ...budget, monthly: '30만원~80만원' }, 'GPU 서버').ruleNote, undefined);
+  assert.equal(calibrateBudget(budget, '동아리 출석 앱').ruleNote, undefined);
+});
+
+test('won amounts are read from the usual ways of writing them', () => {
+  assert.equal(maxMonthlyKrw('1만원~4만원'), 40000);
+  assert.equal(maxMonthlyKrw('10,000~40,000원'), 40000);
+  assert.equal(maxMonthlyKrw('0원~수만원'), 90000);
+  assert.equal(maxMonthlyKrw('추정 불가'), null);
+});
+
+test('integrating an AI model is hard work', () => {
+  assert.equal(calibrateDifficulty(task('오픈소스 AI 분류 모델 통합과 임계값 로직', 'medium')).difficulty, 'hard');
 });

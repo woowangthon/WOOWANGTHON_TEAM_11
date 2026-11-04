@@ -20,14 +20,18 @@ export function FeasibilityPanel({ f }: { f: Feasibility }) {
         <span className="Tag">목적: {GOAL[f.goal]}</span>
         <Dots level={t.level} />
         <span className="Spacer" />
-        <span className={`Badge${f.by === 'rule' ? ' fallback' : ''}`}>{f.by === 'rule' ? '규칙 판정 (AI 판단 없음)' : 'AI 판단'}</span>
+        <span className={`Badge${f.by === 'rule' ? ' fallback' : ''}`}>
+          {f.by === 'rule' ? '규칙 판정 (AI 판단 없음)' : f.raisedBy ? 'AI 판단 + 규칙 보정' : 'AI 판단'}
+        </span>
       </div>
       <p>{t.line}</p>
-      <p className="Muted">{f.why}</p>
-      {f.raisedBy && (
+      {/* A raised verdict shows the rule's reason only: the AI's reasoning argued for the smaller tier. */}
+      {f.raisedBy ? (
         <div className="Error" role="note">
-          <AlertTriangle size={13} /> 규칙으로 규모를 올렸어요: {f.raisedBy}
+          <AlertTriangle size={13} /> 규칙으로 규모를 올렸어요{f.aiTier ? ` (AI는 '${TIER[f.aiTier].label}'로 봤음)` : ''}: {f.raisedBy}
         </div>
+      ) : (
+        <p className="Muted">{f.why}</p>
       )}
       {f.risks.length > 0 && (
         <div className="Tags">

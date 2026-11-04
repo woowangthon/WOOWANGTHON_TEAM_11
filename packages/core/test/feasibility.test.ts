@@ -71,3 +71,16 @@ test('when the model fails, a risky request still gets its rule verdict', async 
   assert.equal(res.data.cards, FALLBACK_CARDS);
   assert.equal(res.data.feasibility?.tier, 'enterprise');
 });
+
+test('telling AI images from hand-drawn ones is enterprise-sized (#36)', () => {
+  assert.equal(tierFloor('AI가 그린 그림인지 사람이 그린 그림인지 판별하는 프로그램')?.tier, 'enterprise');
+  assert.equal(tierFloor('딥페이크 영상 탐지 서비스')?.tier, 'enterprise');
+  assert.equal(tierFloor('AI로 그림 그려주는 앱'), null);
+});
+
+test('a raised verdict carries the rule reason, not the AI reason that argued for less', () => {
+  const f = applyFloor({ ...verdict('personal'), why: '1인 개발로 충분히 가능' }, 'AI가 그린 그림인지 판별하는 프로그램');
+  assert.equal(f.tier, 'enterprise');
+  assert.equal(f.aiTier, 'personal');
+  assert.doesNotMatch(f.why, /1인 개발/);
+});

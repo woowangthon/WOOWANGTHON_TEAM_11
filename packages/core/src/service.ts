@@ -3,7 +3,7 @@ import { chatParsed } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import { CARDS_SYSTEM, TASKS_SYSTEM, cardsUser, tasksUser } from './prompts.ts';
 import type { ChosenFeatures } from './features.ts';
-import { fallbackPlan, parsePlan } from './tasks.ts';
+import { calibrateBudget, fallbackPlan, parsePlan } from './tasks.ts';
 import { MAX_CUSTOM_ANSWER_CHARS } from './profile.ts';
 import type { CardsData, Decision, Plan, Profile, Rule, Source } from './types.ts';
 import { applyFloor, ruleFeasibility } from './feasibility.ts';
@@ -59,11 +59,15 @@ export async function generateTasks(
   domainRules: string[] = [],
   features: ChosenFeatures = { now: [], later: [] },
 ): Promise<Generated<Plan>> {
+  // What the owner decided, in their words: the budget rule looks here for a self-hosted model.
+  const decided = [request, notes, ...decisions.map((d) => `${d.question} ${d.answer}`)].join('\n');
   try {
     const res = await chatParsed(llm, TASKS_SYSTEM, tasksUser(request, decisions, rules, notes, domainRules, profile, features), parsePlan);
-    return { data: res.data, source: 'ai', model: res.model, error: null };
+    const context = `${decided}\n${res.data.stack.map((s) => `${s.choice} ${s.why}`).join('\n')}`;
+    return { data: { ...res.data, budget: calibrateBudget(res.data.budget, context) }, source: 'ai', model: res.model, error: null };
   } catch (err) {
-    return { data: fallbackPlan(profile), source: 'fallback', model: null, error: (err as Error).message };
+    const plan = fallbackPlan(profile);
+    return { data: { ...plan, budget: calibrateBudget(plan.budget, decided) }, source: 'fallback', model: null, error: (err as Error).message };
   }
 }
 

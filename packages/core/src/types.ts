@@ -143,6 +143,8 @@ export interface Budget {
   monthly: string;
   summary: string;
   items: BudgetItem[];
+  /** Set when a rule finds the estimate missing a known cost (e.g. GPU for a self-hosted model). Shown, never hidden. */
+  ruleNote?: string;
 }
 
 /** A security check written for this app (e.g. "can a member change someone else's fine?"). */
@@ -186,6 +188,8 @@ export interface Feasibility {
   scopeDown: string;
   /** Set when a rule raised the tier above the AI's; this reason is shown so the change is visible. */
   raisedBy: string | null;
+  /** The AI's own tier when a rule raised it; its reasoning no longer matches the tier, so it is not shown. */
+  aiTier?: Tier;
   /** 'rule' when the AI gave no verdict and only the rule floor is known. */
   by: 'ai' | 'rule';
 }
