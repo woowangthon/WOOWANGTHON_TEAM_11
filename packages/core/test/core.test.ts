@@ -207,8 +207,13 @@ test('skill recommendations stay capped and no source dominates', () => {
     for (const r of recs) perRepo.set(r.skill.repo, (perRepo.get(r.skill.repo) ?? 0) + 1);
     for (const [repo, n] of perRepo) assert.ok(n <= 2, repo);
   }
+  // Domain skills come before general ones, or every app gets the same generic list (#27).
   const prod = recommendSkills(profiles[1]).map((r) => r.skill.id);
-  assert.ok(prod.includes('tdd'));
+  assert.ok(prod.includes('supabase-postgres-best-practices'));
+  const paid = recommendSkills({ ...DEFAULT_PROFILE, payment: 'yes', money: 'yes' }).map((r) => r.skill.id);
+  assert.equal(paid[0], 'stripe-best-practices');
+  // A project with nothing domain-specific still gets the general ones rather than nothing.
+  assert.ok(recommendSkills(DEFAULT_PROFILE).every((r) => r.skill.kind === 'general'));
 });
 
 test('parsePlan rejects an unknown difficulty instead of showing a blank badge', () => {
