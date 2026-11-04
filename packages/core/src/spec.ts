@@ -123,7 +123,9 @@ export function translatableTexts(input: SpecInput): string[] {
     ...input.decisions.flatMap((d) => [d.question, d.answer]),
     ...input.domainRules,
     ...input.tasks.flatMap((t) => [t.title, t.done, t.reason, ...t.watchouts, ...t.securityChecks.flatMap((c) => [c.what, c.how])]),
-    ...input.stack.flatMap((s) => [s.area, s.why]),
+    // "choice" is usually a product name, which the translator keeps as is, but the model also
+    // writes plain Korean there ("로컬 저장소"), and that used to reach the English spec untouched.
+    ...input.stack.flatMap((s) => [s.area, s.choice, s.why]),
   ];
 }
 
@@ -149,6 +151,6 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
       watchouts: t.watchouts.map(() => next()),
       securityChecks: t.securityChecks.map(() => ({ what: next(), how: next() })),
     })),
-    stack: input.stack.map((s) => ({ ...s, area: next(), why: next() })),
+    stack: input.stack.map((s) => ({ ...s, area: next(), choice: next(), why: next() })),
   };
 }
