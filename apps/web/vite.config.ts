@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { defineConfig, loadEnv } from 'vite';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -47,8 +48,18 @@ function devApi(env: Record<string, string>): Plugin {
   };
 }
 
+/** The commit being built, so an exported run can be matched to the code that produced it. */
+function commit(): string {
+  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // The key lives in the repo-root .env, shared by every app in the monorepo.
   const env = loadEnv(mode, '../..', '');
-  return { plugins: [react(), devApi(env)] };
+  return { plugins: [react(), devApi(env)], define: { __APP_COMMIT__: JSON.stringify(commit()) } };
 });

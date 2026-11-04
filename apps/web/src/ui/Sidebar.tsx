@@ -1,6 +1,7 @@
 import { Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { mergeSkills, recommendSkills } from '@spec/core';
 import type { Profile, Rule, SkillPick } from '@spec/core';
+import type { ReactNode } from 'react';
 import { AiSettings } from './AiSettings.tsx';
 
 const PROFILE_LABEL: { [K in keyof Profile]?: Record<string, string> } = {
@@ -22,13 +23,15 @@ interface Props {
   decided: number;
   /** Picks the AI tailored to this project once a plan exists; null before that or on fallback. */
   skillPicks: SkillPick[] | null;
+  /** Extra panels at the bottom (the run export). */
+  children?: ReactNode;
 }
 
 /**
  * Always-visible summary, so the engineering and security rules being applied are never
  * hidden behind a step the user has already left.
  */
-export function Sidebar({ profile, rules, decided, skillPicks }: Props) {
+export function Sidebar({ profile, rules, decided, skillPicks, children }: Props) {
   if (!profile) {
     return (
       <aside className="Side">
@@ -97,6 +100,7 @@ export function Sidebar({ profile, rules, decided, skillPicks }: Props) {
           </ul>
         ) : <p className="Empty">선택된 보안 규칙이 없습니다.</p>}
       </section>
+      {children}
     </aside>
   );
 }

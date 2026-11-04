@@ -15,3 +15,4 @@ export * from './securityChecks.ts';
 export * from './board.ts';
 export * from './feasibility.ts';
 export * from './features.ts';
+export * from './debug.ts';
