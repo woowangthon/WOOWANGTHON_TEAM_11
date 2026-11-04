@@ -1,4 +1,4 @@
-import { Wallet } from 'lucide-react';
+import { AlertTriangle, Wallet } from 'lucide-react';
 import type { Budget, Generated, Plan } from '@spec/core';
 import { SourceBadge } from './SourceBadge.tsx';
 
@@ -29,6 +29,9 @@ export function BudgetView({ result }: { result: Generated<Plan> }) {
           <span className="StatLabel">{verdict.note}</span>
         </div>
       </div>
+      {budget.ruleNote && (
+        <div className="Error" role="note"><AlertTriangle size={13} /> {budget.ruleNote}</div>
+      )}
       {budget.summary && <p className="Muted">{budget.summary}</p>}
       {budget.items.length > 0 && (
         <div className="Table" role="table" aria-label="서비스별 비용">

@@ -30,6 +30,8 @@ const CASES: { request: string; expected: Tier }[] = [
   // The owner's own test (#25): the same tool, judged differently once the goal differs.
   { request: '오픈소스 mv 만들기용 애니메이션 제작 툴. 개인용 테스트 가능하며 상업용 판매 예정', expected: 'team' },
   { request: '오픈소스 mv 만들기용 애니메이션 제작 툴. 개인 사용 및 오픈소스로 누구나 수정가능하게 하는 수준', expected: 'personal' },
+  // #36: detection with "accurate probabilities" is an open research problem.
+  { request: 'AI가 그린 그림인지 사람이 그린 그림인지 판별하는 프로그램', expected: 'enterprise' },
 ];
 
 mkdirSync(OUT, { recursive: true });
