@@ -1,5 +1,5 @@
 import { Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
-import { SKILLS, recommendSkills } from '@spec/core';
+import { mergeSkills, recommendSkills } from '@spec/core';
 import type { Profile, Rule, SkillPick } from '@spec/core';
 import { AiSettings } from './AiSettings.tsx';
 
@@ -48,11 +48,8 @@ export function Sidebar({ profile, rules, decided, skillPicks }: Props) {
     .filter((t): t is string => Boolean(t));
   // Tailored picks replace the profile-based ones once the plan exists; both come from the vetted catalog.
   const skills = skillPicks?.length
-    ? skillPicks.flatMap((p) => {
-        const skill = SKILLS.find((s) => s.id === p.id);
-        return skill ? [{ skill, reason: p.reason || skill.what }] : [];
-      })
-    : recommendSkills(profile);
+    ? mergeSkills(skillPicks, profile)
+    : recommendSkills(profile).map((r) => ({ ...r, by: 'rule' as const }));
 
   return (
     <aside className="Side">
@@ -69,14 +66,14 @@ export function Sidebar({ profile, rules, decided, skillPicks }: Props) {
       <section className="Panel">
         <h3 className="SideTitle"><Blocks size={14} /> 추천 스킬 {skillPicks?.length ? <span className="Badge">이 프로젝트 맞춤 · AI</span> : <span className="Badge fallback">기본 · 규칙 기반</span>}</h3>
         <ul className="MiniList">
-          {skills.map(({ skill, reason }) => (
+          {skills.map(({ skill, reason, by }) => (
             <li key={skill.id} className="MiniItem">
               <Blocks size={12} />
               <span>
                 <a href={`https://github.com/${skill.repo}`} target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>
                   {skill.name} <ExternalLink size={10} />
                 </a>
-                <span className="Note"> · {skill.repo.split('/')[0]}</span>
+                <span className="Note"> · {skill.repo.split('/')[0]}{skillPicks?.length && by === 'rule' ? ' · 규칙 추가' : ''}</span>
                 <br />
                 <span className="Note">{reason}</span>
               </span>
