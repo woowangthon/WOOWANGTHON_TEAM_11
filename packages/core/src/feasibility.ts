@@ -24,6 +24,13 @@ const FLOORS: { pattern: RegExp; tier: Tier; reason: string }[] = [
     reason: '진료·건강 기록은 법으로 보호되는 민감정보라 별도 보호 조치와 인증이 필요합니다.',
   },
   {
+    // The owner's test (#36): "is this image AI-generated or hand-drawn" came back far too small.
+    pattern:
+      /딥\s?페이크|deepfake|(ai|인공지능).{0,15}(생성|그린|만든|그림|이미지|글).{0,20}(판별|탐지|감지|구분|검출)|(판별|탐지|감지|구분|검출).{0,20}(ai|인공지능).{0,8}(생성|그린|만든)/i,
+    tier: 'enterprise',
+    reason: 'AI 생성물 판별은 아직 풀리지 않은 연구 문제예요. 새 생성 모델이 나올 때마다 다시 학습해야 하고, 사람 그림을 AI로 잘못 판정하면 실제 피해가 생겨서 "정확한 확률"을 혼자 보장할 수 없어요.',
+  },
+  {
     pattern: /실시간\s?(멀티|대전|게임)|mmo|동시\s?접속\s?(수천|수만|만)|대규모\s?트래픽/i,
     tier: 'team',
     reason: '많은 사람이 동시에 쓰는 실시간 기능은 서버 설계와 부하 테스트가 필요해 혼자 AI와 만들기엔 벅찹니다.',
@@ -66,7 +73,8 @@ export function applyFloor(f: Feasibility, request: string): Feasibility {
   const goal = statedGoal(request) ?? f.goal;
   const floor = tierFloor(request);
   if (!floor || rank(floor.tier) <= rank(f.tier)) return { ...f, goal };
-  return { ...f, goal, tier: floor.tier, raisedBy: floor.reason };
+  // The AI's reason argued for the smaller tier; next to the raised one it reads as a contradiction.
+  return { ...f, goal, tier: floor.tier, why: floor.reason, raisedBy: floor.reason, aiTier: f.tier };
 }
 
 /** When the AI gave nothing: only what the rule knows, never an invented app-specific verdict. */

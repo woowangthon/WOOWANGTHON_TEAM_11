@@ -166,12 +166,52 @@ export function stackWarnings(stack: StackItem[]): string[] {
 
 // Topics that are hard for a non-developer with an AI agent whatever the model says: they fail
 // under load, under concurrency or with money, and the failure is not visible in a quick test.
-const HARD_TOPICS = /트래픽|성능|최적화|확장|부하|동시|실시간|결제|환불|웹훅|캐시|마이그레이션|rate\s?limit|요청 제한|scal|concurren|real-?time|payment|webhook|perf/i;
+// Running or training an AI model is on this list since 11/4: "integrate an open-source classifier
+// and return accurate probabilities" came back as "medium" (#36).
+const HARD_TOPICS =
+  /트래픽|성능|최적화|확장|부하|동시|실시간|결제|환불|웹훅|캐시|마이그레이션|rate\s?limit|요청 제한|scal|concurren|real-?time|payment|webhook|perf|ai\s?모델|분류\s?모델|모델\s?(통합|연동|서빙|배포|학습|추론)|추론|inference|gpu|파인\s?튜닝|fine-?tun|classif|판별|탐지|감지|detect/i;
 
 /** Raises a task on a known-hard topic to "hard", saying so, instead of trusting a lower estimate. */
 export function calibrateDifficulty(task: Task): Task {
   if (task.difficulty === 'hard' || !HARD_TOPICS.test(`${task.title} ${task.done}`)) return task;
-  return { ...task, difficulty: 'hard', reason: `(규칙 보정: 부하·동시성·돈이 걸린 작업은 '상') ${task.reason}`.trim() };
+  return { ...task, difficulty: 'hard', reason: `(규칙 보정: 부하·동시성·돈·AI 모델이 걸린 작업은 '상') ${task.reason}`.trim() };
+}
+
+// The decisions or stack say the app runs its own AI model; that means a GPU server.
+const SELF_HOSTED_AI =
+  /(자체|직접|우리)\s?(서버|gpu).{0,40}(모델|ai)|(모델|ai).{0,40}(자체|직접)\s?(서버|호스팅|배포)|on\s?(our|our own|custom)\s?servers?|self-?host|오픈\s?소스.{0,15}(ai|모델)|open-?source\s?(ai\s)?models?|gpu|pytorch|tensorflow|추론\s?서버/i;
+/** Below this a self-hosted model's estimate is missing the GPU: cloud GPUs run well past it monthly. */
+const GPU_MONTHLY_FLOOR_KRW = 100_000;
+
+/** The highest won amount in an estimate like "1만원~4만원" or "10,000~40,000원"; null when none. */
+export function maxMonthlyKrw(monthly: string): number | null {
+  const t = monthly.replace(/,/g, '');
+  const units: Record<string, number> = { 억: 1e8, 천만: 1e7, 백만: 1e6, 십만: 1e5, 만: 1e4, 천: 1e3 };
+  let max: number | null = null;
+  const bump = (v: number) => {
+    if (max === null || v > max) max = v;
+  };
+  for (const m of t.matchAll(/(\d+(?:\.\d+)?)\s*(억|천만|백만|십만|만|천)?/g)) bump(Number(m[1]) * (units[m[2] ?? ''] ?? 1));
+  if (/수백만/.test(t)) bump(9e6);
+  else if (/수십만/.test(t)) bump(9e5);
+  else if (/수만/.test(t)) bump(9e4);
+  return max;
+}
+
+/**
+ * Flags an estimate that leaves out the GPU a self-hosted model needs. The AI's figure stays as it
+ * was and the note says why it is likely too low, so a rule never silently rewrites an AI number.
+ */
+export function calibrateBudget(budget: Budget, context: string): Budget {
+  if (!SELF_HOSTED_AI.test(context)) return budget;
+  const max = maxMonthlyKrw(budget.monthly);
+  if (max !== null && max >= GPU_MONTHLY_FLOOR_KRW) return budget;
+  return {
+    ...budget,
+    freeTier: 'none',
+    ruleNote:
+      '규칙 보정: AI 모델을 자체 서버에서 돌리는 결정이 있어요. 클라우드 GPU 서버는 보통 월 수십만 원 이상이라 위 추정치는 너무 낮을 가능성이 커요. 비용을 줄이려면 사용량만큼 내는 외부 AI API로 바꾸는 방법도 있어요.',
+  };
 }
 
 function parseFocus(raw: unknown): FocusCheck[] {
