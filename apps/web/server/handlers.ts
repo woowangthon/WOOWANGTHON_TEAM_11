@@ -2,6 +2,7 @@
 // middleware both call these, so local and deployed behaviour cannot drift apart.
 import {
   GEMINI_OPENAI_BASE,
+  MAX_FEATURES,
   findRule,
   generateCards,
   generateTasks,
@@ -99,14 +100,25 @@ export async function handleTasks(raw: unknown, env: Env, clientId: string, byok
       profile: parseProfile(obj.profile),
       notes: validateNotes(obj.notes),
       domainRules: parseDomainRules(obj.domainRules),
+      features: { now: parseFeatureLines(obj.featuresNow), later: parseFeatureLines(obj.featuresLater) },
     };
   } catch (err) {
     return badRequest(err);
   }
   return {
     status: 200,
-    body: await generateTasks(llm, input.request, input.decisions, input.rules, input.profile, input.notes, input.domainRules),
+    body: await generateTasks(llm, input.request, input.decisions, input.rules, input.profile, input.notes, input.domainRules, input.features),
   };
+}
+
+/** Chosen feature ideas, as plain sentences; capped like the ideas the cards step can return. */
+function parseFeatureLines(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_FEATURES) throw new Error(`features: expected up to ${MAX_FEATURES} items`);
+  return raw.map((r, i) => {
+    if (typeof r !== 'string') throw new Error(`features[${i}]: expected a string`);
+    return r.slice(0, 240);
+  });
 }
 
 /** Domain rules arrive as plain sentences from the client; cap count and length like decisions. */

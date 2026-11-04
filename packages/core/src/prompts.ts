@@ -1,6 +1,7 @@
 import { MAX_CARDS } from './cards.ts';
 import { PROFILE_SCHEMA } from './types.ts';
 import type { Decision, Profile, Rule } from './types.ts';
+import type { ChosenFeatures } from './features.ts';
 import { SKILLS } from './skills.ts';
 
 const profileVocabulary = Object.entries(PROFILE_SCHEMA)
@@ -13,6 +14,7 @@ The most valuable decisions are business rules, not technology. Find those first
 Return JSON only, in Korean, with this shape:
 {"summary": string,
  "feasibility": {"goal": "personal" | "public" | "commercial", "tier": "personal" | "team" | "enterprise", "why": string, "risks": [string], "goalAdds": [string], "scopeDown": string},
+ "features": [{"name": string, "why": string, "difficulty": "easy" | "medium" | "hard", "essential": boolean}],
  "cards": [{"kind": "domain" | "tech", "question": string, "why": string,
   "options": [{"label": string, "detail": string, "recommended": boolean, "sets": object, "policy": string,
                "difficulty": "easy" | "medium" | "hard", "effort": string}]}]}
@@ -30,6 +32,10 @@ Judge "tier" for that goal, not for the most ambitious version of the idea:
 - "risks": up to 3 short Korean phrases on what is most likely to go wrong for this app and goal.
 - "goalAdds": for "public" or "commercial", up to 4 short Korean phrases on the work that goal adds on top of building it (e.g. "결제·환불", "라이선스·이용약관", "고객 문의 대응"). [] for "personal".
 - "scopeDown": for "team" or "enterprise", one Korean sentence describing the smaller version one person could actually finish (e.g. "실제 거래 없이 시세 조회와 모의 투자만 제공"). "" for "personal".
+
+Features, 3 to 6 of them: what the owner did not ask for but will very likely want within weeks of using this app, the kind of thing that gets bolted on later and bends the structure (for an editor: undo/redo, save and reopen, export formats, shortcuts; for a group app: invite links, notifications, history). Not the core features the request already names, and not wild extras.
+- "name": a short Korean name. "why": one Korean sentence on when the owner will miss it in this app.
+- "difficulty": how much it adds to the build. "essential": true only when the app feels broken without it (e.g. saving work in an editor).
 
 Domain cards ("kind": "domain"), 3 to 5 of them, come first:
 - Business rules this specific app must settle that the request leaves open. Look for: how states are distinguished (e.g. late vs absent), how amounts are calculated, who may create, change or delete what, whether changes keep a history, whether one user can belong to several groups, who can see what, and what happens on cancellation, refund, correction or deletion.
@@ -78,10 +84,23 @@ ${SKILLS.map((s) => `  - ${s.id}: ${s.what}`).join('\n')}
 - The stack must not contradict the decisions (e.g. no server database when the owner chose device storage).
 - Respect every decision and rule given. Do not add features that were not requested.`;
 
-export function tasksUser(request: string, decisions: Decision[], rules: Rule[], notes = '', domainRules: string[] = [], profile?: Profile): string {
+export function tasksUser(
+  request: string,
+  decisions: Decision[],
+  rules: Rule[],
+  notes = '',
+  domainRules: string[] = [],
+  profile?: Profile,
+  features: ChosenFeatures = { now: [], later: [] },
+): string {
   const lines = decisions.map((d) => `- ${d.question} → ${d.answer}`).join('\n');
   const business = domainRules.length ? `\n\nBusiness rules (implement exactly):\n${domainRules.map((r) => `- ${r}`).join('\n')}` : '';
   const extra = `${business}${notes.trim() ? `\n\nOwner's notes:\n"""${notes.trim()}"""` : ''}`;
   const scale = profile ? `\n\nExpected scale chosen by the owner: ${profile.scale === 'large' ? 'large (thousands of users or more, traffic spikes)' : 'small (tens to hundreds of users)'}` : '';
-  return `App request:\n"""${request}"""\n\nDecisions:\n${lines}${extra}${scale}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
+  // "Later" features get no tasks, but the plan must not close the door on them.
+  const now = features.now.length ? `\n\nAlso build these features the owner chose:\n${features.now.map((f) => `- ${f}`).join('\n')}` : '';
+  const later = features.later.length
+    ? `\n\nPlanned for later (no tasks now; keep the structure open for them):\n${features.later.map((f) => `- ${f}`).join('\n')}`
+    : '';
+  return `App request:\n"""${request}"""\n\nDecisions:\n${lines}${extra}${now}${later}${scale}\n\nRules:\n${rules.map((r) => `- ${r.title}`).join('\n')}`;
 }

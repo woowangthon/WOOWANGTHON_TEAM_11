@@ -1,15 +1,18 @@
 import { ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
 import { CUSTOM_ANSWER, MAX_CUSTOM_ANSWER_CHARS, MAX_NOTES_CHARS } from '@spec/core';
-import type { Answers, Card, CardKind, CardsData, CustomAnswers, Generated } from '@spec/core';
+import type { Answers, Card, CardKind, CardsData, CustomAnswers, FeatureChoice, Generated } from '@spec/core';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
 import { Dots } from '../ui/PlanView.tsx';
 import { FeasibilityPanel } from '../ui/FeasibilityPanel.tsx';
+import { FeatureIdeas } from '../ui/FeatureIdeas.tsx';
 
 interface Props {
   result: Generated<CardsData>;
   answers: Answers;
   custom: CustomAnswers;
   notes: string;
+  featureChoices: Record<string, FeatureChoice>;
+  onFeature: (id: string, choice: FeatureChoice) => void;
   onAnswer: (cardId: string, optionId: string) => void;
   onCustom: (cardId: string, text: string) => void;
   onNotes: (text: string) => void;
@@ -22,8 +25,8 @@ const GROUPS: { kind: CardKind; title: string; blurb: string; icon: typeof Scale
   { kind: 'tech', title: '기술 선택', blurb: '어디서 돌아가고 어디에 저장할지 같은 기반 결정입니다.', icon: Cpu },
 ];
 
-export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, onNotes, onBack, onNext }: Props) {
-  const { summary, cards, feasibility } = result.data;
+export function CardsStep({ result, answers, custom, notes, featureChoices, onFeature, onAnswer, onCustom, onNotes, onBack, onNext }: Props) {
+  const { summary, cards, feasibility, features } = result.data;
   const policyOf = (card: Card) => card.options.find((o) => o.id === answers[card.id])?.policy ?? '';
   return (
     <>
@@ -104,6 +107,8 @@ export function CardsStep({ result, answers, custom, notes, onAnswer, onCustom, 
           </div>
         );
       })}
+
+      <FeatureIdeas ideas={features} choices={featureChoices} onChoose={onFeature} />
 
       <section className="Panel">
         <h3 className="CardQ">코딩 AI에게 덧붙일 말 (선택)</h3>

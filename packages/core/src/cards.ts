@@ -2,6 +2,7 @@ import { isProfileKey, isProfileValue } from './profile.ts';
 import { DIFFICULTIES } from './types.ts';
 import type { Card, CardOption, CardsData, Difficulty, Profile } from './types.ts';
 import { parseFeasibility } from './feasibility.ts';
+import { parseFeatures } from './features.ts';
 
 export const MAX_CARDS = 9;
 const MAX_OPTIONS = 4;
@@ -128,6 +129,7 @@ export function parseCards(raw: unknown): CardsData {
     summary: typeof obj.summary === 'string' ? obj.summary.trim().slice(0, 200) : '',
     cards,
     feasibility: parseFeasibility(obj.feasibility),
+    features: parseFeatures(obj.features),
   };
 }
 

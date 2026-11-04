@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deriveProfile, recommendRules, recommendedAnswers, toDecisions, toDomainRules, translatableTexts } from '@spec/core';
-import type { Answers, Card, CardsData, CustomAnswers, Generated, Plan, SpecInput } from '@spec/core';
+import { defaultFeatureChoices, deriveProfile, recommendRules, recommendedAnswers, splitFeatures, toDecisions, toDomainRules, translatableTexts } from '@spec/core';
+import type { Answers, Card, CardsData, CustomAnswers, FeatureChoice, Generated, Plan, SpecInput } from '@spec/core';
 import { fetchCards, fetchTasks, fetchTranslate } from './api.ts';
 import type { TranslateResult } from './api.ts';
 import { applyTheme, loadScheme, saveScheme } from './theme.ts';
@@ -33,6 +33,7 @@ export function App() {
   const [answers, setAnswers] = useState<Answers>({});
   const [custom, setCustom] = useState<CustomAnswers>({});
   const [notes, setNotes] = useState('');
+  const [featureChoices, setFeatureChoices] = useState<Record<string, FeatureChoice>>({});
   // Only the user's deviations are stored; the effective selection is derived from the
   // recommendation, so changing an answer later re-recommends without erasing their toggles.
   const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
@@ -79,6 +80,7 @@ export function App() {
       setAnswers(recommendedAnswers(res.data.cards));
       setCustom({});
       setNotes('');
+      setFeatureChoices(defaultFeatureChoices(res.data.features));
       setRuleOverrides({});
       setSpec(null);
       setStep('cards');
@@ -94,8 +96,12 @@ export function App() {
     run(async () => {
       const decisions = toDecisions(cards, answers, custom);
       const domainRules = toDomainRules(cards, answers, custom);
-      const tasks = await fetchTasks({ request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes, domainRules });
-      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, domainRules, notes, rules: selectedRules, ...tasks.data };
+      const features = splitFeatures(cardsResult?.data.features ?? [], featureChoices);
+      const tasks = await fetchTasks({
+        request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes, domainRules,
+        featuresNow: features.now, featuresLater: features.later,
+      });
+      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, domainRules, notes, features, rules: selectedRules, ...tasks.data };
       setSpec({ input, tasks, translation: await fetchTranslate(translatableTexts(input)) });
       setStep('spec');
     });
@@ -139,6 +145,8 @@ export function App() {
               answers={answers}
               custom={custom}
               notes={notes}
+              featureChoices={featureChoices}
+              onFeature={(id, c) => edit(setFeatureChoices)({ ...featureChoices, [id]: c })}
               onAnswer={(cardId, optionId) => edit(setAnswers)({ ...answers, [cardId]: optionId })}
               onCustom={(cardId, text) => edit(setCustom)({ ...custom, [cardId]: text })}
               onNotes={edit(setNotes)}

@@ -190,11 +190,29 @@ export interface Feasibility {
   by: 'ai' | 'rule';
 }
 
-/** What the cards step returns: the cards plus the verdict on the whole project. */
+/**
+ * A feature the owner did not ask for but will very likely want soon (undo, export, search).
+ * Building with these in view keeps later additions from bending the structure.
+ */
+export interface FeatureIdea {
+  id: string;
+  name: string;
+  /** Why this app will need it, in one sentence. */
+  why: string;
+  difficulty: Difficulty;
+  /** Hard to live without for this app; starts on "now" instead of "later". */
+  essential: boolean;
+}
+
+/** The owner's call on a suggested feature: build it now, plan room for it, or drop it. */
+export type FeatureChoice = 'now' | 'later' | 'no';
+
+/** What the cards step returns: the cards, the verdict on the whole project, and likely features. */
 export interface CardsData {
   summary: string;
   cards: Card[];
   feasibility: Feasibility | null;
+  features: FeatureIdea[];
 }
 
 /** Where a piece of output came from. Shown in the UI: the contest forbids passing fixed output off as AI output. */
