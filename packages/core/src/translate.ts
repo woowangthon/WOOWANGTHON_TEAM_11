@@ -1,4 +1,4 @@
-import { chatJson, extractJson } from './llm.ts';
+import { chatParsed } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import type { Source } from './types.ts';
 
@@ -23,13 +23,15 @@ export function validateLines(raw: unknown): string[] {
 }
 
 async function translateOnce(llm: LlmConfig, lines: string[]): Promise<{ lines: string[]; model: string }> {
-  const res = await chatJson(llm, SYSTEM, JSON.stringify({ lines }));
-  const out = (extractJson(res.text) as { lines?: unknown }).lines;
-  if (!Array.isArray(out) || out.length !== lines.length) {
-    throw new Error(`translation returned ${Array.isArray(out) ? out.length : 'no'} lines for ${lines.length}`);
-  }
+  const res = await chatParsed(llm, SYSTEM, JSON.stringify({ lines }), (raw) => {
+    const out = (raw as { lines?: unknown }).lines;
+    if (!Array.isArray(out) || out.length !== lines.length) {
+      throw new Error(`translation returned ${Array.isArray(out) ? out.length : 'no'} lines for ${lines.length}`);
+    }
+    return out;
+  });
   // Empty in, empty out: a model that fills a blank summary would add text nobody wrote.
-  return { lines: out.map((l, i) => (lines[i].trim() === '' ? '' : String(l))), model: res.model };
+  return { lines: res.data.map((l, i) => (lines[i].trim() === '' ? '' : String(l))), model: res.model };
 }
 
 export interface TranslateResult {

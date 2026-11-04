@@ -251,3 +251,19 @@ test('one malformed card is dropped instead of discarding every card', () => {
   });
   assert.deepEqual(cards.map((c) => [c.id, c.question]), [['c1', 'q1'], ['c2', 'q3']]);
 });
+
+test('one broken JSON answer is asked again instead of dropping the step to defaults', async () => {
+  const good = { cards: [{ question: 'q', options: [{ label: 'a' }, { label: 'b' }] }] };
+  let calls = 0;
+  const llm: LlmConfig = {
+    baseUrl: 'http://x', apiKey: 'k', models: ['m'],
+    fetch: async () => {
+      calls++;
+      const content = calls === 1 ? '{"cards": [ broken' : JSON.stringify(good);
+      return Response.json({ choices: [{ message: { content } }] });
+    },
+  };
+  const res = await generateCards(llm, '할 일 앱');
+  assert.equal(res.source, 'ai');
+  assert.equal(calls, 2);
+});

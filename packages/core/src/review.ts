@@ -1,4 +1,4 @@
-import { chatJson, extractJson } from './llm.ts';
+import { chatParsed } from './llm.ts';
 import type { LlmConfig } from './llm.ts';
 import type { Rule, Source } from './types.ts';
 
@@ -111,9 +111,9 @@ export async function reviewCode(
   const fromRules = staticFindings(code, rules);
   const list = rules.map((r) => `- ${r.id}: ${r.instruction}`).join('\n');
   try {
-    const res = await chatJson(llm, REVIEW_SYSTEM, `Rules:\n${list}\n\nCode:\n${code}`);
-    const fromAi = parseFindings(extractJson(res.text), new Set(rules.map((r) => r.id)));
-    return { findings: mergeFindings(fromRules, fromAi), source: 'ai', model: res.model, error: null };
+    const ids = new Set(rules.map((r) => r.id));
+    const res = await chatParsed(llm, REVIEW_SYSTEM, `Rules:\n${list}\n\nCode:\n${code}`, (raw) => parseFindings(raw, ids));
+    return { findings: mergeFindings(fromRules, res.data), source: 'ai', model: res.model, error: null };
   } catch (err) {
     return { findings: fromRules, source: 'fallback', model: null, error: (err as Error).message };
   }
