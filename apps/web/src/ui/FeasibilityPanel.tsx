@@ -1,12 +1,14 @@
 import { AlertTriangle, Gauge, Scissors } from 'lucide-react';
-import type { Difficulty, Feasibility, Tier } from '@spec/core';
+import type { Difficulty, Feasibility, Goal, Tier } from '@spec/core';
 import { Dots } from './PlanView.tsx';
 
 const TIER: Record<Tier, { label: string; level: Difficulty; line: string }> = {
   personal: { label: '혼자 가능', level: 'easy', line: '혼자 AI 코딩 도구로 며칠~몇 주 안에 동작하는 버전을 만들 수 있는 규모예요.' },
-  team: { label: '팀·실무 경험 필요', level: 'medium', line: '혼자 시작하면 중간에 막힐 가능성이 커요. 범위를 줄이거나 경험자와 함께하세요.' },
+  team: { label: '팀·실무 경험 필요', level: 'medium', line: '혼자서는 오래 걸리거나 실무 경험이 필요한 부분이 있어요. 아래 범위부터 나눠서 하거나 경험자와 함께하세요.' },
   enterprise: { label: '기업급', level: 'hard', line: '실제 서비스로는 보안 감사·법적 대응·상시 운영 조직이 필요한 규모예요. 그대로 시작하지 마세요.' },
 };
+
+const GOAL: Record<Goal, string> = { personal: '개인 사용', public: '공개·오픈소스', commercial: '판매·유료' };
 
 /** The verdict on the whole project, shown before any card so nobody starts something too big blind. */
 export function FeasibilityPanel({ f }: { f: Feasibility }) {
@@ -15,6 +17,7 @@ export function FeasibilityPanel({ f }: { f: Feasibility }) {
     <section className="Panel" aria-label="프로젝트 규모 판정">
       <div className="Row">
         <h2 className="SectionTitle"><Gauge size={17} /> 이 프로젝트의 규모: {t.label}</h2>
+        <span className="Tag">목적: {GOAL[f.goal]}</span>
         <Dots level={t.level} />
         <span className="Spacer" />
         <span className={`Badge${f.by === 'rule' ? ' fallback' : ''}`}>{f.by === 'rule' ? '규칙 판정 (AI 판단 없음)' : 'AI 판단'}</span>
@@ -30,6 +33,9 @@ export function FeasibilityPanel({ f }: { f: Feasibility }) {
         <div className="Tags">
           {f.risks.map((r) => <span key={r} className="Tag">{r}</span>)}
         </div>
+      )}
+      {f.goalAdds.length > 0 && (
+        <p className="Note">{GOAL[f.goal]} 목적 때문에 추가되는 일: {f.goalAdds.join(' · ')}</p>
       )}
       {f.scopeDown && (
         <p className="Note"><Scissors size={12} /> 혼자 끝낼 수 있는 범위: {f.scopeDown}</p>

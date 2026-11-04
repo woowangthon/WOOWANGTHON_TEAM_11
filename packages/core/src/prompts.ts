@@ -12,17 +12,23 @@ Find the decisions where the request can be read in more than one way and where 
 The most valuable decisions are business rules, not technology. Find those first.
 Return JSON only, in Korean, with this shape:
 {"summary": string,
- "feasibility": {"tier": "personal" | "team" | "enterprise", "why": string, "risks": [string], "scopeDown": string},
+ "feasibility": {"goal": "personal" | "public" | "commercial", "tier": "personal" | "team" | "enterprise", "why": string, "risks": [string], "goalAdds": [string], "scopeDown": string},
  "cards": [{"kind": "domain" | "tech", "question": string, "why": string,
   "options": [{"label": string, "detail": string, "recommended": boolean, "sets": object, "policy": string,
                "difficulty": "easy" | "medium" | "hard", "effort": string}]}]}
 
-Feasibility comes first. Judge the whole project the way a senior engineer would when a non-developer says they will build it alone with an AI coding agent. Starting something far too big and abandoning it halfway is the worst outcome, so be blunt and do not soften:
-- "personal": one person with an AI agent can ship a working version in days to a few weeks (club attendance, todo list, personal budget, small booking page).
+Feasibility comes first. Judge the whole project the way a senior engineer would when a non-developer says they will build it alone with an AI coding agent. Starting something far too big and abandoning it halfway is the worst outcome, so be honest in both directions: blunt about what is truly big, and not alarmist about what one person can run for themselves.
+First decide "goal", how far the owner means to take it, from the request:
+- "personal": for the owner (and maybe friends) to use. Technically demanding is not the same as too big: a canvas editor or an animation tool the owner runs locally is "personal" when one person can get a version that works for them, even if it takes weeks. Say what will take long in "why" instead of raising the tier.
+- "public": released for strangers to use or modify (open source, free public site). Adds documentation, issue handling, more varied environments.
+- "commercial": sold or charging money. Adds payments and refunds, licensing and terms, customer support, update and distribution, reliability strangers will pay for. A commercial goal is at least "team", and those commercial additions must appear in "risks" or "goalAdds".
+Judge "tier" for that goal, not for the most ambitious version of the idea:
+- "personal": one person with an AI agent can ship a working version for this goal in days to a few weeks (club attendance, todo list, personal budget, small booking page, a local creative tool for one's own use).
 - "team": needs real backend and operations experience or several people: real payments and refunds, marketplaces, real-time features, thousands of concurrent users, many integrations.
 - "enterprise": regulated, high-stakes or targeted by attackers: holding or moving other people's money or crypto (exchanges, wallets, trading, remittance), medical records, identity verification. Running it for real needs a company: security audits, legal compliance, 24/7 operation. A Bitcoin exchange is "enterprise" even when the request sounds small.
-- "why": one or two Korean sentences naming the concrete reasons (cost, regulation, security, operations, scale).
-- "risks": up to 3 short Korean phrases on what is most likely to go wrong.
+- "why": one or two Korean sentences naming the concrete reasons for THIS app and goal: name its actual features (e.g. "키프레임 타임라인과 영상 내보내기"), not generic categories. If two requests differ only in goal, the "why" must differ.
+- "risks": up to 3 short Korean phrases on what is most likely to go wrong for this app and goal.
+- "goalAdds": for "public" or "commercial", up to 4 short Korean phrases on the work that goal adds on top of building it (e.g. "결제·환불", "라이선스·이용약관", "고객 문의 대응"). [] for "personal".
 - "scopeDown": for "team" or "enterprise", one Korean sentence describing the smaller version one person could actually finish (e.g. "실제 거래 없이 시세 조회와 모의 투자만 제공"). "" for "personal".
 
 Domain cards ("kind": "domain"), 3 to 5 of them, come first:

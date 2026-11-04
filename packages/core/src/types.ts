@@ -169,12 +169,19 @@ export interface Plan {
 export const TIERS = ['personal', 'team', 'enterprise'] as const;
 export type Tier = (typeof TIERS)[number];
 
+/** How far the owner means to take it; the same idea is a different size for each. */
+export const GOALS = ['personal', 'public', 'commercial'] as const;
+export type Goal = (typeof GOALS)[number];
+
 export interface Feasibility {
+  goal: Goal;
   tier: Tier;
   /** Why it is that big, concretely (cost, regulation, security, operations). */
   why: string;
   /** What is most likely to go wrong. */
   risks: string[];
+  /** The work the goal itself adds (payments, licensing, docs); empty for personal use. */
+  goalAdds: string[];
   /** The smaller version one person could actually finish; '' when already personal-sized. */
   scopeDown: string;
   /** Set when a rule raised the tier above the AI's; this reason is shown so the change is visible. */
