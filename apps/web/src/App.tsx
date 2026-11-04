@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { defaultFeatureChoices, deriveProfile, recommendRules, recommendedAnswers, splitFeatures, toDecisions, toDomainRules, translatableTexts } from '@spec/core';
+import { buildSpec, defaultFeatureChoices, deriveProfile, recommendRules, recommendedAnswers, splitFeatures, toDecisions, toDomainRules, translatableTexts, withTexts } from '@spec/core';
 import type { Answers, Card, CardsData, CustomAnswers, FeatureChoice, Generated, Plan, SpecInput } from '@spec/core';
 import { fetchCards, fetchTasks, fetchTranslate } from './api.ts';
 import type { TranslateResult } from './api.ts';
@@ -8,6 +8,8 @@ import type { Scheme } from './theme.ts';
 import { TopNav } from './ui/TopNav.tsx';
 import type { NavStep } from './ui/TopNav.tsx';
 import { Sidebar } from './ui/Sidebar.tsx';
+import { DebugExport } from './ui/DebugExport.tsx';
+import { getCredentials } from './credentials.ts';
 import { RequestStep } from './steps/RequestStep.tsx';
 import { CardsStep } from './steps/CardsStep.tsx';
 import { RulesStep } from './steps/RulesStep.tsx';
@@ -194,7 +196,30 @@ export function App() {
           rules={selectedRules}
           decided={cards.filter((c) => answers[c.id]).length}
           skillPicks={spec?.tasks.source === 'ai' ? spec.tasks.data.skills : null}
-        />
+        >
+          {cardsResult && (
+            <DebugExport
+              input={{
+                ai: (() => {
+                  const creds = getCredentials();
+                  return creds ? { provider: creds.provider, model: creds.model } : { provider: 'server-default', model: '' };
+                })(),
+                request,
+                cards: cardsResult,
+                answers,
+                custom,
+                notes,
+                featureChoices,
+                ruleOverrides,
+                profile,
+                selectedRuleIds: selectedRules.map((r) => r.id),
+                tasks: spec?.tasks ?? null,
+                translation: spec?.translation ?? null,
+                spec: spec ? { en: buildSpec(withTexts(spec.input, spec.translation.lines), 'en'), ko: buildSpec(spec.input, 'ko') } : null,
+              }}
+            />
+          )}
+        </Sidebar>
       </div>
     </>
   );
