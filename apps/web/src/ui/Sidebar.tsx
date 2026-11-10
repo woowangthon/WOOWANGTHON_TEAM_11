@@ -1,4 +1,4 @@
-import { Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
+import { AlertTriangle, Blocks, ExternalLink, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { mergeSkills, recommendSkills } from '@spec/core';
 import type { Profile, Rule, SkillPick } from '@spec/core';
 import type { ReactNode } from 'react';
@@ -25,13 +25,15 @@ interface Props {
   skillPicks: SkillPick[] | null;
   /** Extra panels at the bottom (the run export). */
   children?: ReactNode;
+  /** Kept at the top on every step, so a too-big project is never out of sight (enterprise only). */
+  warning?: string;
 }
 
 /**
  * Always-visible summary, so the engineering and security rules being applied are never
  * hidden behind a step the user has already left.
  */
-export function Sidebar({ profile, rules, decided, skillPicks, children }: Props) {
+export function Sidebar({ profile, rules, decided, skillPicks, children, warning }: Props) {
   if (!profile) {
     return (
       <aside className="Side">
@@ -57,6 +59,9 @@ export function Sidebar({ profile, rules, decided, skillPicks, children }: Props
   return (
     <aside className="Side">
       <span className="SideHead">실시간 요약</span>
+      {warning && (
+        <div className="AloneBanner" role="note"><AlertTriangle size={16} /> <span><b>혼자 개발: 사실상 불가능</b><br />{warning}</span></div>
+      )}
       <section className="Panel">
         <h3 className="SideTitle"><Sparkles size={14} /> 프로젝트 요약</h3>
         <div className="Tags">{tags.map((t) => <span key={t} className="Tag">{t}</span>)}</div>

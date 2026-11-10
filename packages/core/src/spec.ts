@@ -1,4 +1,4 @@
-import type { Decision, Difficulty, Rule, StackItem, Task } from './types.ts';
+import type { Decision, Difficulty, Rule, StackItem, Task, Tier } from './types.ts';
 import type { ChosenFeatures } from './features.ts';
 
 export type SpecLang = 'en' | 'ko';
@@ -13,6 +13,11 @@ export interface SpecInput {
   notes: string;
   /** Suggested features the owner kept: built now, or planned for later. Absent means none. */
   features?: ChosenFeatures;
+  /**
+   * The size verdict when the project is bigger than one person can finish, so the coding agent
+   * keeps to a prototype instead of building towards the full product. Absent when personal-sized.
+   */
+  size?: { tier: Exclude<Tier, 'personal'>; scopeDown: string };
   rules: Rule[];
   tasks: Task[];
   stack: StackItem[];
@@ -30,6 +35,12 @@ const HEADINGS = {
     featuresNow: '## Features to include',
     featuresLater: '## Planned for later (do not build yet)',
     featuresLaterNote: 'Keep the structure open for these: do not hard-code anything that would block adding them later.',
+    size: '## Project size warning',
+    sizeLines: {
+      enterprise:
+        'The owner was told this project is enterprise-sized: practically impossible for one person to build and run for real with current tools. Build a prototype only. Do not handle real money, real personal data or production traffic, and ask before expanding beyond this scope:',
+      team: 'The owner was told this project needs a team or real operations experience. Keep to the smallest version that works, and ask before expanding beyond this scope:',
+    },
     engineering: '## Engineering rules',
     security: '## Security rules',
     plan: '## Build plan',
@@ -56,6 +67,12 @@ const HEADINGS = {
     featuresNow: '## 함께 만들 기능',
     featuresLater: '## 나중에 추가할 기능 (지금은 만들지 않음)',
     featuresLaterNote: '나중에 붙일 수 있게 구조를 열어 두세요. 이 기능들을 막는 방식으로 하드코딩하지 마세요.',
+    size: '## 프로젝트 규모 경고',
+    sizeLines: {
+      enterprise:
+        '주인은 이 프로젝트가 기업급(현재 기술로 개인이 실서비스로 만들고 운영하기 사실상 불가능)이라는 안내를 받았습니다. 프로토타입만 만드세요. 실제 돈·실제 개인정보·실서비스 트래픽은 다루지 말고, 아래 범위를 넘기 전에 먼저 물어보세요:',
+      team: '주인은 이 프로젝트가 팀이나 실무 운영 경험이 필요한 규모라는 안내를 받았습니다. 동작하는 가장 작은 버전에 머물고, 아래 범위를 넘기 전에 먼저 물어보세요:',
+    },
     engineering: '## 유지보수 규칙',
     security: '## 보안 규칙',
     plan: '## 작업 계획',
@@ -91,6 +108,8 @@ export function buildSpec(input: SpecInput, lang: SpecLang = 'en'): string {
   const lines: string[] = [
     h.title,
     '',
+    // The size warning goes before the goal: an agent reading top-down must meet it first.
+    ...(input.size ? [h.size, `${h.sizeLines[input.size.tier]} ${input.size.scopeDown}`.trim(), ''] : []),
     h.goal,
     request.trim(),
     ...(summary ? ['', summary] : []),
@@ -140,6 +159,7 @@ export function translatableTexts(input: SpecInput): string[] {
     ...input.stack.flatMap((s) => [s.area, s.choice, s.why]),
     ...(input.features?.now ?? []),
     ...(input.features?.later ?? []),
+    ...(input.size ? [input.size.scopeDown] : []),
   ];
 }
 
@@ -169,5 +189,6 @@ export function withTexts(input: SpecInput, texts: string[]): SpecInput {
     ...(input.features && {
       features: { now: input.features.now.map(() => next()), later: input.features.later.map(() => next()) },
     }),
+    ...(input.size && { size: { ...input.size, scopeDown: next() } }),
   };
 }
