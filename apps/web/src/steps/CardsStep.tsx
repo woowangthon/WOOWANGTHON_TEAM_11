@@ -1,4 +1,5 @@
-import { ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Cpu, PenLine, Scale } from 'lucide-react';
 import { CUSTOM_ANSWER, MAX_CUSTOM_ANSWER_CHARS, MAX_NOTES_CHARS } from '@spec/core';
 import type { Answers, Card, CardKind, CardsData, CustomAnswers, FeatureChoice, Generated } from '@spec/core';
 import { SourceBadge } from '../ui/SourceBadge.tsx';
@@ -27,6 +28,7 @@ const GROUPS: { kind: CardKind; title: string; blurb: string; icon: typeof Scale
 
 export function CardsStep({ result, answers, custom, notes, featureChoices, onFeature, onAnswer, onCustom, onNotes, onBack, onNext }: Props) {
   const { summary, cards, feasibility, features } = result.data;
+  const [confirmed, setConfirmed] = useState(false);
   const policyOf = (card: Card) => card.options.find((o) => o.id === answers[card.id])?.policy ?? '';
   return (
     <>
@@ -125,7 +127,16 @@ export function CardsStep({ result, answers, custom, notes, featureChoices, onFe
       <div className="Row">
         <button className="Btn" onClick={onBack}><ArrowLeft size={15} /> 요청 고치기</button>
         <span className="Spacer" />
-        <button className="Btn primary" onClick={onNext}>규칙 고르기 <ArrowRight size={15} /></button>
+        {/* Enterprise-sized: going on takes a second, deliberate click (inline two-step, no dialog). */}
+        {feasibility?.tier === 'enterprise' && !confirmed ? (
+          <button className="Btn primary" onClick={() => setConfirmed(true)}>
+            <AlertTriangle size={15} /> 기업급 프로젝트예요. 알고 진행할게요
+          </button>
+        ) : (
+          <button className="Btn primary" onClick={onNext}>
+            {feasibility?.tier === 'enterprise' ? '그래도 진행 (범위를 줄여서)' : '규칙 고르기'} <ArrowRight size={15} />
+          </button>
+        )}
       </div>
     </>
   );

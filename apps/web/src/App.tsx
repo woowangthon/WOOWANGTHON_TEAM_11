@@ -103,7 +103,9 @@ export function App() {
         request, decisions, ruleIds: selectedRules.map((r) => r.id), profile, notes, domainRules,
         featuresNow: features.now, featuresLater: features.later,
       });
-      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, domainRules, notes, features, rules: selectedRules, ...tasks.data };
+      const verdict = cardsResult?.data.feasibility;
+      const size = verdict && verdict.tier !== 'personal' ? { tier: verdict.tier, scopeDown: verdict.scopeDown } : undefined;
+      const input: SpecInput = { request, summary: cardsResult?.data.summary ?? '', decisions, domainRules, notes, features, size, rules: selectedRules, ...tasks.data };
       setSpec({ input, tasks, translation: await fetchTranslate(translatableTexts(input)) });
       setStep('spec');
     });
@@ -196,6 +198,7 @@ export function App() {
           rules={selectedRules}
           decided={cards.filter((c) => answers[c.id]).length}
           skillPicks={spec?.tasks.source === 'ai' ? spec.tasks.data.skills : null}
+          warning={cardsResult?.data.feasibility?.tier === 'enterprise' ? '기업급 프로젝트예요. 프로토타입 범위로만 진행하세요.' : undefined}
         >
           {cardsResult && (
             <DebugExport
