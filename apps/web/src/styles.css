@@ -236,3 +236,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .OptionCost { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; padding-top: 0.35rem; border-top: 1px dashed var(--border-color); }
 .OptionCost .Dots { padding-top: 0; }
 .SubHead { margin: 0.3rem 0 0; font-size: 0.86rem; font-weight: 800; }
+
+/* "Can I build this alone?" — a three-step scale, the current step solid accent. */
+.AloneScale { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.AloneLabel { font-size: 0.78rem; font-weight: 800; white-space: nowrap; margin-right: 0.2rem; }
+.AloneStep { font-size: 0.78rem; font-weight: 700; padding: 0.3rem 0.75rem; border-radius: 999px; white-space: nowrap; border: 1px solid var(--border-color); color: var(--text-muted); }
+.AloneStep.on { font-weight: 900; background: var(--accent-color); border-color: var(--accent-color); color: var(--accent-contrast); }
+.AloneBanner { word-break: keep-all; display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.9rem 1.1rem; border-radius: 14px; background: var(--accent-color); color: var(--accent-contrast); font-size: 0.86rem; line-height: 1.5; }
+.AloneBanner b { font-size: 1rem; font-weight: 900; }
+.AloneBanner svg { flex-shrink: 0; margin-top: 0.15rem; }

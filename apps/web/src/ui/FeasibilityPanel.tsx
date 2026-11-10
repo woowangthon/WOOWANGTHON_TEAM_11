@@ -10,6 +10,14 @@ const TIER: Record<Tier, { label: string; level: Difficulty; line: string }> = {
 
 const GOAL: Record<Goal, string> = { personal: '개인 사용', public: '공개·오픈소스', commercial: '판매·유료' };
 
+// The question the owner actually has: "can I build this alone?" The tier name ("기업급") did not
+// say it plainly enough, so the answer is a scale with the current step filled (feedback 11/10).
+const ALONE: { tier: Tier; label: string }[] = [
+  { tier: 'personal', label: '혼자 가능' },
+  { tier: 'team', label: '혼자는 어려움' },
+  { tier: 'enterprise', label: '사실상 불가능' },
+];
+
 /** The verdict on the whole project, shown before any card so nobody starts something too big blind. */
 export function FeasibilityPanel({ f }: { f: Feasibility }) {
   const t = TIER[f.tier];
@@ -24,6 +32,22 @@ export function FeasibilityPanel({ f }: { f: Feasibility }) {
           {f.by === 'rule' ? '규칙 판정 (AI 판단 없음)' : f.raisedBy ? 'AI 판단 + 규칙 보정' : 'AI 판단'}
         </span>
       </div>
+      <div className="AloneScale" role="img" aria-label={`혼자 개발: ${ALONE.find((a) => a.tier === f.tier)?.label}`}>
+        <span className="AloneLabel">혼자 개발</span>
+        {ALONE.map((a) => (
+          <span key={a.tier} className={`AloneStep${a.tier === f.tier ? ' on' : ''}`}>{a.label}</span>
+        ))}
+      </div>
+      {f.tier === 'enterprise' && (
+        <div className="AloneBanner" role="alert">
+          <AlertTriangle size={18} />
+          <span>
+            <b>현재 기술로 개인이 만들기는 사실상 불가능해요.</b>
+            <br />이대로 시작하면 중간에 멈출 가능성이 매우 커요.{' '}
+            {f.scopeDown ? "아래 '혼자 끝낼 수 있는 범위'로 줄이거나" : '범위를 크게 줄이거나'} 팀·회사 단위로 진행하세요.
+          </span>
+        </div>
+      )}
       <p>{t.line}</p>
       {/* A raised verdict shows the rule's reason only: the AI's reasoning argued for the smaller tier. */}
       {f.raisedBy ? (
