@@ -46,3 +46,15 @@ test('no ideas are made up when the model fails', async () => {
   assert.deepEqual((await generateCards(llm, '편집기')).data.features, []);
   assert.deepEqual(parseCards({ cards: [{ question: 'q', options: [{ label: 'a' }, { label: 'b' }] }] }).features, []);
 });
+
+test('an enterprise-sized project opens the spec with a prototype-only warning, before the goal', () => {
+  const input = {
+    request: 'r', summary: '', domainRules: [], notes: '', decisions: [], tasks: [], stack: [], rules: [],
+    size: { tier: 'enterprise' as const, scopeDown: '시세 조회와 모의 투자만' },
+  };
+  const en = buildSpec(withTexts(input, translatableTexts(input).map((t) => (t === '시세 조회와 모의 투자만' ? 'Price lookup and paper trading only' : t))), 'en');
+  assert.ok(en.indexOf('## Project size warning') < en.indexOf('## Goal'));
+  assert.match(en, /Build a prototype only[\s\S]*Price lookup and paper trading only/);
+  assert.match(buildSpec(input, 'ko'), /## 프로젝트 규모 경고/);
+  assert.doesNotMatch(buildSpec({ ...input, size: undefined }, 'en'), /size warning/);
+});
