@@ -1,0 +1,352 @@
+=== package.json ===
+{
+  "name": "gym-pt-booking",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+
+=== server.js ===
+import express from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_FILE = path.join(__dirname, "data.json");
+const SLOT_HOURS = [9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20];
+
+function load() {
+  if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  return {
+    trainers: [
+      { id: "t1", name: "김코치" },
+      { id: "t2", name: "이코치" },
+    ],
+    members: [],
+    bookings: [],
+  };
+}
+let db = load();
+function save() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+}
+const id = () => crypto.randomUUID();
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+function fail(res, status, message) {
+  return res.status(status).json({ error: message });
+}
+
+app.get("/api/trainers", (_req, res) => res.json(db.trainers));
+
+app.get("/api/members", (_req, res) => res.json(db.members));
+
+app.post("/api/members", (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const phone = String(req.body.phone || "").trim();
+  if (!name) return fail(res, 400, "이름을 입력하세요.");
+  if (db.members.some((m) => m.phone && m.phone === phone)) return fail(res, 409, "이미 등록된 전화번호입니다.");
+  const member = { id: id(), name, phone, remaining: 0, history: [] };
+  db.members.push(member);
+  save();
+  res.status(201).json(member);
+});
+
+// 회원권 충전 (횟수 추가)
+app.post("/api/members/:id/passes", (req, res) => {
+  const member = db.members.find((m) => m.id === req.params.id);
+  if (!member) return fail(res, 404, "회원을 찾을 수 없습니다.");
+  const count = Number(req.body.count);
+  if (!Number.isInteger(count) || count <= 0 || count > 200) return fail(res, 400, "충전 횟수는 1~200 사이 정수여야 합니다.");
+  member.remaining += count;
+  member.history.push({ at: new Date().toISOString(), change: count, reason: "회원권 충전" });
+  save();
+  res.json(member);
+});
+
+app.get("/api/slots", (req, res) => {
+  const { trainerId, date } = req.query;
+  if (!trainerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return fail(res, 400, "트레이너와 날짜를 지정하세요.");
+  const now = Date.now();
+  const slots = SLOT_HOURS.map((h) => {
+    const start = `${date}T${String(h).padStart(2, "0")}:00`;
+    const taken = db.bookings.some((b) => b.trainerId === trainerId && b.start === start && b.status === "booked");
+    const past = new Date(start).getTime() <= now;
+    return { start, available: !taken && !past };
+  });
+  res.json(slots);
+});
+
+app.get("/api/bookings", (req, res) => {
+  const { memberId } = req.query;
+  const list = db.bookings
+    .filter((b) => !memberId || b.memberId === memberId)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  res.json(list);
+});
+
+app.post("/api/bookings", (req, res) => {
+  const { memberId, trainerId, start } = req.body;
+  const member = db.members.find((m) => m.id === memberId);
+  const trainer = db.trainers.find((t) => t.id === trainerId);
+  if (!member) return fail(res, 404, "회원을 찾을 수 없습니다.");
+  if (!trainer) return fail(res, 404, "트레이너를 찾을 수 없습니다.");
+  if (typeof start !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:00$/.test(start)) return fail(res, 400, "잘못된 시간입니다.");
+  const hour = Number(start.slice(11, 13));
+  if (!SLOT_HOURS.includes(hour)) return fail(res, 400, "예약 가능한 시간이 아닙니다.");
+  if (new Date(start).getTime() <= Date.now()) return fail(res, 400, "지난 시간은 예약할 수 없습니다.");
+  if (member.remaining <= 0) return fail(res, 400, "남은 PT 횟수가 없습니다. 회원권을 충전하세요.");
+  const active = (b) => b.status === "booked" && b.start === start;
+  if (db.bookings.some((b) => active(b) && b.trainerId === trainerId)) return fail(res, 409, "이미 예약된 시간입니다.");
+  if (db.bookings.some((b) => active(b) && b.memberId === memberId)) return fail(res, 409, "같은 시간에 다른 예약이 있습니다.");
+
+  member.remaining -= 1;
+  member.history.push({ at: new Date().toISOString(), change: -1, reason: `PT 예약 ${start} (${trainer.name})` });
+  const booking = { id: id(), memberId, memberName: member.name, trainerId, trainerName: trainer.name, start, status: "booked" };
+  db.bookings.push(booking);
+  save();
+  res.status(201).json(booking);
+});
+
+// 취소: 수업 24시간 전까지는 횟수 복구, 이후는 차감 유지
+app.post("/api/bookings/:id/cancel", (req, res) => {
+  const booking = db.bookings.find((b) => b.id === req.params.id);
+  if (!booking) return fail(res, 404, "예약을 찾을 수 없습니다.");
+  if (booking.status !== "booked") return fail(res, 400, "취소할 수 없는 예약입니다.");
+  const startMs = new Date(booking.start).getTime();
+  if (startMs <= Date.now()) return fail(res, 400, "이미 시작된 수업은 취소할 수 없습니다.");
+  const member = db.members.find((m) => m.id === booking.memberId);
+  const refundable = startMs - Date.now() >= 24 * 3600 * 1000;
+  booking.status = "cancelled";
+  if (member && refundable) {
+    member.remaining += 1;
+    member.history.push({ at: new Date().toISOString(), change: 1, reason: `예약 취소 ${booking.start}` });
+  } else if (member) {
+    member.history.push({ at: new Date().toISOString(), change: 0, reason: `당일 취소 (횟수 차감 유지) ${booking.start}` });
+  }
+  save();
+  res.json({ booking, refunded: refundable });
+});
+
+// 수업 완료 처리
+app.post("/api/bookings/:id/complete", (req, res) => {
+  const booking = db.bookings.find((b) => b.id === req.params.id);
+  if (!booking) return fail(res, 404, "예약을 찾을 수 없습니다.");
+  if (booking.status !== "booked") return fail(res, 400, "완료 처리할 수 없는 예약입니다.");
+  booking.status = "done";
+  save();
+  res.json(booking);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PT 예약</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; background: #f6f6f6; color: #222; }
+    section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 0; }
+    input, select, button { font: inherit; padding: 6px 10px; margin: 4px 4px 4px 0; }
+    button { cursor: pointer; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    .slots { display: flex; flex-wrap: wrap; gap: 6px; }
+    .remaining { font-size: 28px; font-weight: bold; color: #2563eb; }
+    .remaining.zero { color: #dc2626; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 6px; border-bottom: 1px solid #eee; font-size: 14px; }
+    #msg { min-height: 20px; color: #dc2626; }
+    #msg.ok { color: #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>헬스장 PT 예약</h1>
+  <div id="msg"></div>
+
+  <section>
+    <h2>회원 등록</h2>
+    <input id="newName" placeholder="이름" />
+    <input id="newPhone" placeholder="전화번호" />
+    <button id="addMember">등록</button>
+  </section>
+
+  <section>
+    <h2>회원 선택</h2>
+    <select id="memberSelect"></select>
+    <div>남은 PT 횟수: <span id="remaining" class="remaining">-</span></div>
+    <input id="passCount" type="number" min="1" value="10" style="width:80px" />
+    <button id="charge">회원권 충전</button>
+  </section>
+
+  <section>
+    <h2>예약하기</h2>
+    <select id="trainerSelect"></select>
+    <input id="date" type="date" />
+    <div id="slots" class="slots"></div>
+    <p style="font-size:13px;color:#666">수업 24시간 전까지 취소하면 횟수가 복구됩니다. 이후 취소는 차감이 유지됩니다.</p>
+  </section>
+
+  <section>
+    <h2>내 예약</h2>
+    <table><thead><tr><th>시간</th><th>트레이너</th><th>상태</th><th></th></tr></thead><tbody id="bookings"></tbody></table>
+  </section>
+
+  <section>
+    <h2>횟수 변동 내역</h2>
+    <table><tbody id="history"></tbody></table>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/app.js ===
+const $ = (id) => document.getElementById(id);
+const STATUS = { booked: "예약됨", cancelled: "취소", done: "완료" };
+let members = [];
+
+function show(text, ok = false) {
+  $("msg").textContent = text;
+  $("msg").className = ok ? "ok" : "";
+}
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "요청 실패");
+  return data;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+const currentMember = () => members.find((m) => m.id === $("memberSelect").value);
+
+async function loadMembers(selectId) {
+  members = await api("/api/members");
+  const sel = $("memberSelect");
+  const prev = selectId || sel.value;
+  sel.innerHTML = members.length
+    ? members.map((m) => `<option value="${m.id}">${esc(m.name)} ${esc(m.phone)}</option>`).join("")
+    : `<option value="">회원을 먼저 등록하세요</option>`;
+  if (prev && members.some((m) => m.id === prev)) sel.value = prev;
+  await refreshMember();
+}
+
+async function refreshMember() {
+  const m = currentMember();
+  const r = $("remaining");
+  r.textContent = m ? `${m.remaining}회` : "-";
+  r.className = "remaining" + (m && m.remaining === 0 ? " zero" : "");
+  $("history").innerHTML = m
+    ? m.history.slice().reverse().map((h) =>
+        `<tr><td>${new Date(h.at).toLocaleString()}</td><td>${h.change > 0 ? "+" : ""}${h.change}</td><td>${esc(h.reason)}</td></tr>`).join("")
+    : "";
+  await loadBookings();
+  await loadSlots();
+}
+
+async function loadBookings() {
+  const m = currentMember();
+  if (!m) { $("bookings").innerHTML = ""; return; }
+  const list = await api(`/api/bookings?memberId=${encodeURIComponent(m.id)}`);
+  $("bookings").innerHTML = list.map((b) => `
+    <tr>
+      <td>${b.start.replace("T", " ")}</td>
+      <td>${esc(b.trainerName)}</td>
+      <td>${STATUS[b.status]}</td>
+      <td>${b.status === "booked"
+        ? `<button data-cancel="${b.id}">취소</button><button data-done="${b.id}">완료</button>`
+        : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="4">예약이 없습니다.</td></tr>`;
+}
+
+async function loadSlots() {
+  const trainerId = $("trainerSelect").value;
+  const date = $("date").value;
+  if (!trainerId || !date) return;
+  const slots = await api(`/api/slots?trainerId=${trainerId}&date=${date}`);
+  const m = currentMember();
+  $("slots").innerHTML = slots.map((s) =>
+    `<button class="primary" data-start="${s.start}" ${s.available && m && m.remaining > 0 ? "" : "disabled"}>${s.start.slice(11)}</button>`).join("");
+}
+
+$("addMember").onclick = async () => {
+  try {
+    const m = await api("/api/members", { method: "POST", body: { name: $("newName").value, phone: $("newPhone").value } });
+    $("newName").value = ""; $("newPhone").value = "";
+    show(`${m.name} 회원이 등록되었습니다.`, true);
+    await loadMembers(m.id);
+  } catch (e) { show(e.message); }
+};
+
+$("charge").onclick = async () => {
+  const m = currentMember();
+  if (!m) return show("회원을 선택하세요.");
+  try {
+    await api(`/api/members/${m.id}/passes`, { method: "POST", body: { count: Number($("passCount").value) } });
+    show("회원권이 충전되었습니다.", true);
+    await loadMembers();
+  } catch (e) { show(e.message); }
+};
+
+$("slots").onclick = async (e) => {
+  const start = e.target.dataset.start;
+  const m = currentMember();
+  if (!start || !m) return;
+  if (!confirm(`${start.replace("T", " ")}에 예약할까요? PT 1회가 차감됩니다.`)) return;
+  try {
+    await api("/api/bookings", { method: "POST", body: { memberId: m.id, trainerId: $("trainerSelect").value, start } });
+    show("예약되었습니다.", true);
+    await loadMembers();
+  } catch (err) { show(err.message); await loadSlots(); }
+};
+
+$("bookings").onclick = async (e) => {
+  const { cancel, done } = e.target.dataset;
+  try {
+    if (cancel) {
+      if (!confirm("예약을 취소할까요?")) return;
+      const r = await api(`/api/bookings/${cancel}/cancel`, { method: "POST" });
+      show(r.refunded ? "취소되었습니다. 횟수가 복구되었습니다." : "취소되었습니다. 24시간 이내 취소라 횟수는 복구되지 않습니다.", true);
+    } else if (done) {
+      await api(`/api/bookings/${done}/complete`, { method: "POST" });
+      show("수업 완료로 처리했습니다.", true);
+    } else return;
+    await loadMembers();
+  } catch (err) { show(err.message); }
+};
+
+$("memberSelect").onchange = refreshMember;
+$("trainerSelect").onchange = loadSlots;
+$("date").onchange = loadSlots;
+
+(async () => {
+  const trainers = await api("/api/trainers");
+  $("trainerSelect").innerHTML = trainers.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  const d = new Date();
+  $("date").value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  await loadMembers();
+})();

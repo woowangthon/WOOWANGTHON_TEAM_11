@@ -1,0 +1,91 @@
+{
+  "findings": [
+    {
+      "ruleId": "eng-structure",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-file-size",
+      "verdict": "violation",
+      "evidence": "server.js",
+      "fix": "server.js 파일을 책임별로 분할하세요.",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-duplication",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-no-silent-failure",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-decisions-log",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "eng-single-source",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-secrets",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-input-validation",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-password",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-authz",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-db-access",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    },
+    {
+      "ruleId": "sec-rate-limit",
+      "verdict": "ok",
+      "evidence": "",
+      "fix": "",
+      "by": "ai"
+    }
+  ],
+  "source": "ai",
+  "model": "gemini-flash-lite-latest",
+  "error": null
+}

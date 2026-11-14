@@ -31,8 +31,9 @@
 
 ## 검증
 - 사양서 유무 비교 (요청 3건): 사양서가 있으면 환경변수 사용·입력 검증·파일 분리가 **3건 모두** 지켜짐(없으면 0건). 첫 시도 출력 토큰은 줄지 않음 → [docs/experiment/INTERPRETATION.md](docs/experiment/INTERPRETATION.md)
-- 왕복 횟수 실험(위반 0까지 몇 번 다시 요청하나, 코딩은 맥락 없는 Claude 서브에이전트): 사양서가 있으면 두 요청 모두 **첫 답에서 위반 0**, 없으면 수정 요청 2회·1회 → [docs/experiment/rounds-agent/INTERPRETATION.md](docs/experiment/rounds-agent/INTERPRETATION.md)
-- 규모 판정 점검(기대 규모를 정한 요청 10개, 11/4): AI 단독 9/10, 규칙 보정 후 최종 10/10 일치 → [docs/experiment/difficulty/README.md](docs/experiment/difficulty/README.md)
+- 왕복 횟수 실험(위반 0까지 몇 번 다시 요청하나, 코딩은 맥락 없는 Claude 서브에이전트, 요청 5건): 사양서가 있으면 **5건 모두 첫 답에서 위반 0**, 없으면 4건에서 수정 요청 1~3회. 단순한 앱 1건은 차이가 없었고 사양서 쪽이 토큰만 더 썼음 → [docs/experiment/rounds-agent/INTERPRETATION.md](docs/experiment/rounds-agent/INTERPRETATION.md)
+- 규모 판정 반복 점검(요청 20개 × 3회, 11/14): 최종 판정 **54/60회(90%)** 가 기대와 일치, AI 단독은 48/60회(80%). 틀린 6회는 무료 모델 응답 실패 3회 + 오판 3회 → [docs/experiment/difficulty-repeat/README.md](docs/experiment/difficulty-repeat/README.md)
+- 서비스가 제 역할을 하는가(11/14): 한 줄 요청에서 결정 사항·기능을 요청당 8개쯤 끌어냄. 기존 API로 되는 AI 서비스는 26/26회 '혼자 가능'. **모델을 직접 학습시켜야 하는 AI 서비스는 처음엔 10/15회만 잡아서 규칙을 추가**했고, 규칙을 만들 때 보지 않은 새 요청에서 7/8회 → [docs/experiment/hidden-hard/INTERPRETATION.md](docs/experiment/hidden-hard/INTERPRETATION.md)
 - 요청 수가 적어 통계가 아닌 경향 확인 수준. AI 적용·미검증 범위는 [docs/SCOPE.md](docs/SCOPE.md)
 
 ## AI 제공자와 API 키

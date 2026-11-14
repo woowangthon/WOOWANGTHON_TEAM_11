@@ -1,0 +1,618 @@
+=== package.json ===
+{
+  "name": "gym-pt-booking",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+
+=== server.js ===
+// 진입점: 미들웨어 조립과 라우터 연결만 담당
+import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { rateLimit } from "./src/rateLimit.js";
+import { auth, authRouter } from "./src/auth.js";
+import { trainersRouter } from "./src/routes/trainers.js";
+import { membersRouter } from "./src/routes/members.js";
+import { bookingsRouter } from "./src/routes/bookings.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const app = express();
+app.use(express.json({ limit: "10kb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+app.use("/api", rateLimit({ name: "api", windowMs: 60 * 1000, max: 300 }));
+app.use("/api", authRouter);
+app.use("/api", auth);
+app.use("/api", trainersRouter);
+app.use("/api", membersRouter);
+app.use("/api", bookingsRouter);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+
+=== src/http.js ===
+// 공통 오류 응답
+export function fail(res, status, message) {
+  return res.status(status).json({ error: message });
+}
+
+=== src/password.js ===
+// 비밀번호 해시와 검증
+import crypto from "node:crypto";
+
+export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  return `${salt}:${crypto.scryptSync(password, salt, 64).toString("hex")}`;
+}
+
+export function verifyPassword(password, stored) {
+  const [salt, hash] = String(stored || "").split(":");
+  if (!salt || !hash) return false;
+  const a = Buffer.from(hash, "hex");
+  const b = crypto.scryptSync(password, salt, 64);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+=== src/store.js ===
+// 데이터 저장소: JSON 파일 읽기/쓰기와 초기 데이터
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import { hashPassword } from "./password.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_FILE = path.join(__dirname, "..", "data.json");
+
+function load() {
+  if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  let adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    adminPassword = crypto.randomBytes(9).toString("base64url");
+    console.log(`관리자 초기 비밀번호 (ID: admin): ${adminPassword}`);
+  }
+  return {
+    admins: [{ id: "admin", username: "admin", passwordHash: hashPassword(adminPassword) }],
+    trainers: [
+      { id: "t1", name: "김코치" },
+      { id: "t2", name: "이코치" },
+    ],
+    members: [],
+    bookings: [],
+  };
+}
+
+export const db = load();
+
+export function save() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+}
+
+export const newId = () => crypto.randomUUID();
+export const publicMember = ({ passwordHash, ...m }) => m;
+
+=== src/rateLimit.js ===
+// 요청 횟수 제한 (IP + 구간별, 메모리 기반)
+import { fail } from "./http.js";
+
+export function rateLimit({ windowMs, max, name }) {
+  const hits = new Map();
+  return (req, res, next) => {
+    const key = `${name}:${req.ip}`;
+    const now = Date.now();
+    const entry = hits.get(key);
+    if (!entry || now - entry.start > windowMs) {
+      hits.set(key, { start: now, count: 1 });
+      return next();
+    }
+    entry.count += 1;
+    if (entry.count > max) {
+      res.set("Retry-After", String(Math.ceil((entry.start + windowMs - now) / 1000)));
+      return fail(res, 429, "요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
+    }
+    next();
+  };
+}
+
+export const writeLimit = rateLimit({ name: "write", windowMs: 60 * 1000, max: 30 });
+
+=== src/auth.js ===
+// 인증과 권한: 세션, 로그인/로그아웃, 권한 미들웨어
+import express from "express";
+import crypto from "node:crypto";
+import { db } from "./store.js";
+import { fail } from "./http.js";
+import { verifyPassword } from "./password.js";
+import { rateLimit } from "./rateLimit.js";
+
+const SESSION_TTL_MS = 8 * 3600 * 1000;
+const sessions = new Map();
+const loginLimit = rateLimit({ name: "login", windowMs: 15 * 60 * 1000, max: 10 });
+const tokenOf = (req) => (req.get("Authorization") || "").replace(/^Bearer /, "");
+
+export function auth(req, res, next) {
+  const token = tokenOf(req);
+  const session = token && sessions.get(token);
+  if (!session || session.expires < Date.now()) {
+    if (session) sessions.delete(token);
+    return fail(res, 401, "로그인이 필요합니다.");
+  }
+  if (session.role === "member" && !db.members.some((m) => m.id === session.userId)) return fail(res, 401, "로그인이 필요합니다.");
+  req.user = session;
+  next();
+}
+
+export const adminOnly = (req, res, next) => (req.user.role === "admin" ? next() : fail(res, 403, "관리자만 할 수 있습니다."));
+export const canAccessMember = (user, memberId) => user.role === "admin" || user.userId === memberId;
+
+export const authRouter = express.Router();
+
+authRouter.post("/login", loginLimit, (req, res) => {
+  const { role, username, password } = req.body;
+  const login = String(username || "").trim();
+  const pw = String(password || "");
+  let userId = null;
+  if (role === "admin") {
+    const admin = db.admins.find((a) => a.username === login);
+    if (admin && verifyPassword(pw, admin.passwordHash)) userId = admin.id;
+  } else {
+    const member = db.members.find((m) => m.phone === login);
+    if (member && verifyPassword(pw, member.passwordHash)) userId = member.id;
+  }
+  if (!userId) return fail(res, 401, "아이디 또는 비밀번호가 올바르지 않습니다.");
+  const token = crypto.randomBytes(32).toString("hex");
+  const userRole = role === "admin" ? "admin" : "member";
+  sessions.set(token, { userId, role: userRole, expires: Date.now() + SESSION_TTL_MS });
+  res.json({ token, role: userRole, userId });
+});
+
+authRouter.post("/logout", auth, (req, res) => {
+  sessions.delete(tokenOf(req));
+  res.json({ ok: true });
+});
+
+=== src/routes/trainers.js ===
+// 트레이너 목록
+import express from "express";
+import { db } from "../store.js";
+
+export const trainersRouter = express.Router();
+
+trainersRouter.get("/trainers", (_req, res) => res.json(db.trainers));
+
+=== src/routes/members.js ===
+// 회원 관리: 조회, 등록, 회원권 충전
+import express from "express";
+import { db, save, newId, publicMember } from "../store.js";
+import { fail } from "../http.js";
+import { hashPassword } from "../password.js";
+import { adminOnly, canAccessMember } from "../auth.js";
+import { writeLimit } from "../rateLimit.js";
+
+export const membersRouter = express.Router();
+
+membersRouter.get("/members", (req, res) => {
+  const list = db.members.filter((m) => canAccessMember(req.user, m.id));
+  res.json(list.map(publicMember));
+});
+
+membersRouter.post("/members", writeLimit, adminOnly, (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const phone = String(req.body.phone || "").trim();
+  const password = String(req.body.password || "");
+  if (!name) return fail(res, 400, "이름을 입력하세요.");
+  if (!/^[0-9-]{9,13}$/.test(phone)) return fail(res, 400, "전화번호 형식이 올바르지 않습니다.");
+  if (password.length < 8) return fail(res, 400, "비밀번호는 8자 이상이어야 합니다.");
+  if (db.members.some((m) => m.phone === phone)) return fail(res, 409, "이미 등록된 전화번호입니다.");
+  const member = { id: newId(), name, phone, passwordHash: hashPassword(password), remaining: 0, history: [] };
+  db.members.push(member);
+  save();
+  res.status(201).json(publicMember(member));
+});
+
+// 회원권 충전 (횟수 추가) - 관리자 전용
+membersRouter.post("/members/:id/passes", writeLimit, adminOnly, (req, res) => {
+  const member = db.members.find((m) => m.id === req.params.id);
+  if (!member) return fail(res, 404, "회원을 찾을 수 없습니다.");
+  const count = Number(req.body.count);
+  if (!Number.isInteger(count) || count <= 0 || count > 200) return fail(res, 400, "충전 횟수는 1~200 사이 정수여야 합니다.");
+  member.remaining += count;
+  member.history.push({ at: new Date().toISOString(), change: count, reason: "회원권 충전" });
+  save();
+  res.json(publicMember(member));
+});
+
+=== src/routes/bookings.js ===
+// 예약: 빈 시간 조회, 예약, 취소, 완료
+import express from "express";
+import { db, save, newId } from "../store.js";
+import { fail } from "../http.js";
+import { adminOnly, canAccessMember } from "../auth.js";
+import { writeLimit } from "../rateLimit.js";
+
+const SLOT_HOURS = [9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20];
+
+export const bookingsRouter = express.Router();
+
+bookingsRouter.get("/slots", (req, res) => {
+  const { trainerId, date } = req.query;
+  if (!trainerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return fail(res, 400, "트레이너와 날짜를 지정하세요.");
+  const now = Date.now();
+  const slots = SLOT_HOURS.map((h) => {
+    const start = `${date}T${String(h).padStart(2, "0")}:00`;
+    const taken = db.bookings.some((b) => b.trainerId === trainerId && b.start === start && b.status === "booked");
+    const past = new Date(start).getTime() <= now;
+    return { start, available: !taken && !past };
+  });
+  res.json(slots);
+});
+
+bookingsRouter.get("/bookings", (req, res) => {
+  let { memberId } = req.query;
+  if (req.user.role !== "admin") {
+    if (memberId && memberId !== req.user.userId) return fail(res, 403, "다른 회원의 예약은 볼 수 없습니다.");
+    memberId = req.user.userId;
+  }
+  const list = db.bookings
+    .filter((b) => !memberId || b.memberId === memberId)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  res.json(list);
+});
+
+bookingsRouter.post("/bookings", writeLimit, (req, res) => {
+  const { memberId, trainerId, start } = req.body;
+  if (!canAccessMember(req.user, memberId)) return fail(res, 403, "본인 예약만 할 수 있습니다.");
+  const member = db.members.find((m) => m.id === memberId);
+  const trainer = db.trainers.find((t) => t.id === trainerId);
+  if (!member) return fail(res, 404, "회원을 찾을 수 없습니다.");
+  if (!trainer) return fail(res, 404, "트레이너를 찾을 수 없습니다.");
+  if (typeof start !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:00$/.test(start)) return fail(res, 400, "잘못된 시간입니다.");
+  const hour = Number(start.slice(11, 13));
+  if (!SLOT_HOURS.includes(hour)) return fail(res, 400, "예약 가능한 시간이 아닙니다.");
+  if (new Date(start).getTime() <= Date.now()) return fail(res, 400, "지난 시간은 예약할 수 없습니다.");
+  if (member.remaining <= 0) return fail(res, 400, "남은 PT 횟수가 없습니다. 회원권을 충전하세요.");
+  const active = (b) => b.status === "booked" && b.start === start;
+  if (db.bookings.some((b) => active(b) && b.trainerId === trainerId)) return fail(res, 409, "이미 예약된 시간입니다.");
+  if (db.bookings.some((b) => active(b) && b.memberId === memberId)) return fail(res, 409, "같은 시간에 다른 예약이 있습니다.");
+
+  member.remaining -= 1;
+  member.history.push({ at: new Date().toISOString(), change: -1, reason: `PT 예약 ${start} (${trainer.name})` });
+  const booking = { id: newId(), memberId, memberName: member.name, trainerId, trainerName: trainer.name, start, status: "booked" };
+  db.bookings.push(booking);
+  save();
+  res.status(201).json(booking);
+});
+
+// 취소: 수업 24시간 전까지는 횟수 복구, 이후는 차감 유지
+bookingsRouter.post("/bookings/:id/cancel", writeLimit, (req, res) => {
+  const booking = db.bookings.find((b) => b.id === req.params.id);
+  if (!booking || !canAccessMember(req.user, booking.memberId)) return fail(res, 404, "예약을 찾을 수 없습니다.");
+  if (booking.status !== "booked") return fail(res, 400, "취소할 수 없는 예약입니다.");
+  const startMs = new Date(booking.start).getTime();
+  if (startMs <= Date.now()) return fail(res, 400, "이미 시작된 수업은 취소할 수 없습니다.");
+  const member = db.members.find((m) => m.id === booking.memberId);
+  const refundable = startMs - Date.now() >= 24 * 3600 * 1000;
+  booking.status = "cancelled";
+  if (member && refundable) {
+    member.remaining += 1;
+    member.history.push({ at: new Date().toISOString(), change: 1, reason: `예약 취소 ${booking.start}` });
+  } else if (member) {
+    member.history.push({ at: new Date().toISOString(), change: 0, reason: `당일 취소 (횟수 차감 유지) ${booking.start}` });
+  }
+  save();
+  res.json({ booking, refunded: refundable });
+});
+
+// 수업 완료 처리 - 관리자 전용
+bookingsRouter.post("/bookings/:id/complete", writeLimit, adminOnly, (req, res) => {
+  const booking = db.bookings.find((b) => b.id === req.params.id);
+  if (!booking) return fail(res, 404, "예약을 찾을 수 없습니다.");
+  if (booking.status !== "booked") return fail(res, 400, "완료 처리할 수 없는 예약입니다.");
+  booking.status = "done";
+  save();
+  res.json(booking);
+});
+
+=== docs/decisions.md ===
+# 설계 결정 기록 (비관적 기본값)
+
+판단이 애매할 때는 "사고가 나도 피해가 작은 쪽"을 택했다.
+
+| # | 결정 | 이유 |
+|---|------|------|
+| 1 | 권한 확인은 모두 서버에서 한다. 화면에서 버튼을 숨기는 것은 편의일 뿐이다 | 클라이언트는 조작될 수 있다 |
+| 2 | 회원은 본인 데이터(회원 정보, 예약, 횟수 내역)만 조회·변경할 수 있다. 다른 회원 예약은 404로 응답해 존재 여부도 드러내지 않는다 | 개인정보(이름·전화번호·이용 내역) 보호 |
+| 3 | 회원 등록, 회원권 충전, 수업 완료 처리는 관리자만 한다 | 횟수는 돈과 같으므로 회원이 스스로 늘릴 수 없어야 한다 |
+| 4 | 예약 시 횟수를 먼저 확인하고 즉시 차감한다. 0회면 예약을 거부한다 | 횟수 초과 사용 방지 |
+| 5 | 취소는 수업 24시간 전까지만 횟수를 복구한다. 이후 취소와 시작된 수업 취소는 복구하지 않는다 | 노쇼·직전 취소로 인한 트레이너 손실 방지. 기준 시간은 운영 정책에 맞게 조정 |
+| 6 | 같은 트레이너·같은 시간, 같은 회원·같은 시간의 중복 예약을 막는다 | 이중 예약 방지 |
+| 7 | 모든 횟수 변동은 history에 남긴다 (0회 변동인 직전 취소 포함) | 분쟁 시 근거 |
+| 8 | 비밀번호는 scrypt + 솔트로 저장하고, 응답에서 해시를 제거한다 | 저장소 유출 대비 |
+| 9 | 관리자 초기 비밀번호는 고정값을 쓰지 않는다. ADMIN_PASSWORD가 없으면 무작위로 만들어 서버 콘솔에만 출력한다 | 기본 비밀번호 방치 방지 |
+| 10 | 세션은 8시간 후 만료된다. 로그인 실패 메시지는 아이디/비밀번호 중 무엇이 틀렸는지 알려주지 않는다 | 탈취 피해 축소, 계정 추측 방지 |
+| 11 | 요청 횟수 제한: 로그인 15분 10회, 쓰기 요청 분당 30회, 전체 API 분당 300회 (IP 기준) | 비밀번호 대입·남용 방지 |
+| 12 | 요청 본문은 10kb로 제한한다 | 큰 요청으로 인한 자원 고갈 방지 |
+
+## 알려진 한계
+- 세션과 요청 제한 기록은 메모리에 있어 서버 재시작 시 초기화되고, 서버를 여러 대 띄우면 공유되지 않는다.
+- 데이터는 단일 JSON 파일에 저장한다. 동시 쓰기가 많은 실서비스에는 DB와 트랜잭션이 필요하다.
+- 프록시 뒤에서 운영하면 `app.set("trust proxy", ...)`를 설정해야 IP 기준 제한이 정확하다.
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PT 예약</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; background: #f6f6f6; color: #222; }
+    section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 0; }
+    input, select, button { font: inherit; padding: 6px 10px; margin: 4px 4px 4px 0; }
+    button { cursor: pointer; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    .slots { display: flex; flex-wrap: wrap; gap: 6px; }
+    .remaining { font-size: 28px; font-weight: bold; color: #2563eb; }
+    .remaining.zero { color: #dc2626; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 6px; border-bottom: 1px solid #eee; font-size: 14px; }
+    #msg { min-height: 20px; color: #dc2626; }
+    #msg.ok { color: #16a34a; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>헬스장 PT 예약</h1>
+  <div id="msg"></div>
+
+  <section id="loginBox">
+    <h2>로그인</h2>
+    <select id="loginRole"><option value="member">회원 (전화번호)</option><option value="admin">관리자</option></select>
+    <input id="loginId" placeholder="전화번호 또는 관리자 ID" />
+    <input id="loginPw" type="password" placeholder="비밀번호" />
+    <button id="loginBtn" class="primary">로그인</button>
+  </section>
+
+  <div id="app" class="hidden">
+    <button id="logoutBtn">로그아웃</button>
+
+    <section class="admin-only">
+      <h2>회원 등록 (관리자)</h2>
+      <input id="newName" placeholder="이름" />
+      <input id="newPhone" placeholder="전화번호" />
+      <input id="newPw" type="password" placeholder="초기 비밀번호 (8자 이상)" />
+      <button id="addMember">등록</button>
+    </section>
+
+    <section>
+      <h2>회원</h2>
+      <select id="memberSelect"></select>
+      <div>남은 PT 횟수: <span id="remaining" class="remaining">-</span></div>
+      <span class="admin-only">
+        <input id="passCount" type="number" min="1" value="10" style="width:80px" />
+        <button id="charge">회원권 충전</button>
+      </span>
+    </section>
+
+    <section>
+      <h2>예약하기</h2>
+      <select id="trainerSelect"></select>
+      <input id="date" type="date" />
+      <div id="slots" class="slots"></div>
+      <p style="font-size:13px;color:#666">수업 24시간 전까지 취소하면 횟수가 복구됩니다. 이후 취소는 차감이 유지됩니다.</p>
+    </section>
+
+    <section>
+      <h2>예약 내역</h2>
+      <table><thead><tr><th>시간</th><th>트레이너</th><th>상태</th><th></th></tr></thead><tbody id="bookings"></tbody></table>
+    </section>
+
+    <section>
+      <h2>횟수 변동 내역</h2>
+      <table><tbody id="history"></tbody></table>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/app.js ===
+const $ = (id) => document.getElementById(id);
+const STATUS = { booked: "예약됨", cancelled: "취소", done: "완료" };
+let members = [];
+let session = null;
+try {
+  session = JSON.parse(sessionStorage.getItem("session"));
+} catch (e) {
+  console.warn("저장된 로그인 정보를 읽지 못해 다시 로그인이 필요합니다.", e);
+  session = null;
+}
+const isAdmin = () => session && session.role === "admin";
+
+function show(text, ok = false) {
+  $("msg").textContent = text;
+  $("msg").className = ok ? "ok" : "";
+}
+
+async function api(url, options = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (session) headers.Authorization = `Bearer ${session.token}`;
+  const res = await fetch(url, { ...options, headers, body: options.body ? JSON.stringify(options.body) : undefined });
+  const data = await res.json();
+  if (res.status === 401 && session) { logoutLocal(); throw new Error("다시 로그인하세요."); }
+  if (!res.ok) throw new Error(data.error || "요청 실패");
+  return data;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+const currentMember = () => members.find((m) => m.id === $("memberSelect").value);
+
+async function loadMembers(selectId) {
+  members = await api("/api/members");
+  const sel = $("memberSelect");
+  const prev = selectId || sel.value;
+  sel.innerHTML = members.length
+    ? members.map((m) => `<option value="${m.id}">${esc(m.name)} ${esc(m.phone)}</option>`).join("")
+    : `<option value="">회원을 먼저 등록하세요</option>`;
+  if (prev && members.some((m) => m.id === prev)) sel.value = prev;
+  sel.disabled = !isAdmin();
+  await refreshMember();
+}
+
+async function refreshMember() {
+  const m = currentMember();
+  const r = $("remaining");
+  r.textContent = m ? `${m.remaining}회` : "-";
+  r.className = "remaining" + (m && m.remaining === 0 ? " zero" : "");
+  $("history").innerHTML = m
+    ? m.history.slice().reverse().map((h) =>
+        `<tr><td>${new Date(h.at).toLocaleString()}</td><td>${h.change > 0 ? "+" : ""}${h.change}</td><td>${esc(h.reason)}</td></tr>`).join("")
+    : "";
+  await loadBookings();
+  await loadSlots();
+}
+
+async function loadBookings() {
+  const m = currentMember();
+  if (!m) { $("bookings").innerHTML = ""; return; }
+  const list = await api(`/api/bookings?memberId=${encodeURIComponent(m.id)}`);
+  $("bookings").innerHTML = list.map((b) => `
+    <tr>
+      <td>${b.start.replace("T", " ")}</td>
+      <td>${esc(b.trainerName)}</td>
+      <td>${STATUS[b.status]}</td>
+      <td>${b.status === "booked"
+        ? `<button data-cancel="${b.id}">취소</button>${isAdmin() ? `<button data-done="${b.id}">완료</button>` : ""}`
+        : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="4">예약이 없습니다.</td></tr>`;
+}
+
+async function loadSlots() {
+  const trainerId = $("trainerSelect").value;
+  const date = $("date").value;
+  if (!trainerId || !date) return;
+  const slots = await api(`/api/slots?trainerId=${encodeURIComponent(trainerId)}&date=${date}`);
+  const m = currentMember();
+  $("slots").innerHTML = slots.map((s) =>
+    `<button class="primary" data-start="${s.start}" ${s.available && m && m.remaining > 0 ? "" : "disabled"}>${s.start.slice(11)}</button>`).join("");
+}
+
+function logoutLocal() {
+  session = null;
+  try {
+    sessionStorage.removeItem("session");
+  } catch (e) {
+    console.warn("브라우저에 저장된 로그인 정보를 지우지 못했습니다.", e);
+  }
+  $("app").classList.add("hidden");
+  $("loginBox").classList.remove("hidden");
+}
+
+async function enterApp() {
+  $("loginBox").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden", !isAdmin()));
+  const trainers = await api("/api/trainers");
+  $("trainerSelect").innerHTML = trainers.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  const d = new Date();
+  $("date").value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  await loadMembers();
+}
+
+$("loginBtn").onclick = async () => {
+  try {
+    session = await api("/api/login", { method: "POST", body: { role: $("loginRole").value, username: $("loginId").value, password: $("loginPw").value } });
+    let message = "로그인되었습니다.";
+    try {
+      sessionStorage.setItem("session", JSON.stringify(session));
+    } catch (e) {
+      console.warn("로그인 정보를 브라우저에 저장하지 못했습니다.", e);
+      message = "로그인되었습니다. (브라우저 저장소를 쓸 수 없어 새로고침하면 다시 로그인해야 합니다)";
+    }
+    $("loginPw").value = "";
+    show(message, true);
+    await enterApp();
+  } catch (e) { show(e.message); }
+};
+
+$("logoutBtn").onclick = async () => {
+  let serverOk = true;
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch (e) {
+    serverOk = false;
+    console.error("서버 로그아웃 요청 실패", e);
+  }
+  logoutLocal();
+  if (serverOk) show("로그아웃되었습니다.", true);
+  else show("이 기기에서는 로그아웃했지만 서버 세션 종료에 실패했습니다. 세션은 8시간 후 자동 만료됩니다.");
+};
+
+$("addMember").onclick = async () => {
+  try {
+    const m = await api("/api/members", { method: "POST", body: { name: $("newName").value, phone: $("newPhone").value, password: $("newPw").value } });
+    $("newName").value = ""; $("newPhone").value = ""; $("newPw").value = "";
+    show(`${m.name} 회원이 등록되었습니다.`, true);
+    await loadMembers(m.id);
+  } catch (e) { show(e.message); }
+};
+
+$("charge").onclick = async () => {
+  const m = currentMember();
+  if (!m) return show("회원을 선택하세요.");
+  try {
+    await api(`/api/members/${m.id}/passes`, { method: "POST", body: { count: Number($("passCount").value) } });
+    show("회원권이 충전되었습니다.", true);
+    await loadMembers();
+  } catch (e) { show(e.message); }
+};
+
+$("slots").onclick = async (e) => {
+  const start = e.target.dataset.start;
+  const m = currentMember();
+  if (!start || !m) return;
+  if (!confirm(`${start.replace("T", " ")}에 예약할까요? PT 1회가 차감됩니다.`)) return;
+  try {
+    await api("/api/bookings", { method: "POST", body: { memberId: m.id, trainerId: $("trainerSelect").value, start } });
+    show("예약되었습니다.", true);
+    await loadMembers();
+  } catch (err) { show(err.message); await loadSlots(); }
+};
+
+$("bookings").onclick = async (e) => {
+  const { cancel, done } = e.target.dataset;
+  try {
+    if (cancel) {
+      if (!confirm("예약을 취소할까요?")) return;
+      const r = await api(`/api/bookings/${cancel}/cancel`, { method: "POST" });
+      show(r.refunded ? "취소되었습니다. 횟수가 복구되었습니다." : "취소되었습니다. 24시간 이내 취소라 횟수는 복구되지 않습니다.", true);
+    } else if (done) {
+      await api(`/api/bookings/${done}/complete`, { method: "POST" });
+      show("수업 완료로 처리했습니다.", true);
+    } else return;
+    await loadMembers();
+  } catch (err) { show(err.message); }
+};
+
+$("memberSelect").onchange = () => refreshMember().catch((e) => show(e.message));
+$("trainerSelect").onchange = () => loadSlots().catch((e) => show(e.message));
+$("date").onchange = () => loadSlots().catch((e) => show(e.message));
+
+if (session) enterApp().catch((e) => show(e.message));
+
+=== CHANGES ===
+1. server.js 분할: server.js는 미들웨어 조립·라우터 연결만 남기고, 오류 응답(src/http.js), 비밀번호 해시(src/password.js), 데이터 저장(src/store.js), 요청 제한(src/rateLimit.js), 인증·권한·로그인(src/auth.js), 트레이너(src/routes/trainers.js), 회원·충전(src/routes/members.js), 빈 시간·예약·취소·완료(src/routes/bookings.js)로 나눔. 동작과 API 경로는 그대로.

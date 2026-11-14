@@ -1,0 +1,801 @@
+=== package.json ===
+{
+  "name": "team-deadlines",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.46.1",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
+=== tsconfig.json ===
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["dom", "dom.iterable", "esnext"], "strict": true, "noEmit": true,
+    "module": "esnext", "moduleResolution": "bundler", "jsx": "preserve", "esModuleInterop": true,
+    "skipLibCheck": true, "isolatedModules": true, "incremental": true,
+    "plugins": [{ "name": "next" }], "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+=== postcss.config.mjs ===
+export default { plugins: { "@tailwindcss/postcss": {} } };
+=== .gitignore ===
+node_modules
+.next
+.env
+.env.local
+=== .env.example ===
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+# IANA time zone used to decide "today" for the delayed flag
+APP_TIMEZONE=
+=== docs/decisions.md ===
+# Design decisions
+
+1. **Delayed is a derived flag, not a fourth status.** Reason: the owner fixed status to exactly 3 values; delay is computed from `due_date` + `status` on every read, so it can never go stale. Rejected: storing `delayed` in the DB or a nightly job that rewrites status.
+2. **"Today" is computed on the server in one time zone (`APP_TIMEZONE`, default Asia/Seoul), and `due_date` is a `date` column.** Reason: a due date is a calendar day for the team, so comparing `YYYY-MM-DD` strings in one fixed zone avoids browser/server time-zone drift. Rejected: `timestamptz` deadlines compared against the browser clock.
+3. **Owner-only rule is enforced three times: domain check in API routes, RLS policies, and a DB trigger on `tasks`.** Reason: members may change task status, but only the owner may change title, due date or role; RLS alone cannot restrict by column, so a trigger guards the plan fields. Rejected: hiding buttons in the UI only.
+4. **API routes use the user's own Supabase session (anon key + cookies), never a service-role key.** Reason: RLS then applies to every query, so a bug in a route cannot leak another project. Rejected: service-role client with manual filtering.
+5. **Members are added by email through the `add_member` SECURITY DEFINER function.** Reason: profiles (emails) are only visible to co-members; the function checks ownership and looks the email up without exposing the profiles table. Rejected: a public profiles select policy.
+6. **Composite foreign keys keep roles and assignees inside the same project.** `tasks(role_id, project_id) -> roles(id, project_id)` and `roles(project_id, assignee_id) -> project_members`. Reason: the DB itself rejects cross-project references. Rejected: checking only in application code.
+7. **Login/signup rate limit is in-memory per server instance.** Reason: no extra paid service; Supabase Auth also applies its own limits. Known limit: counters reset on cold start and are not shared across instances. Rejected: Redis (cost).
+=== supabase/schema.sql ===
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null unique
+);
+create function public.handle_new_user() returns trigger language plpgsql security definer set search_path = public as $$
+begin insert into public.profiles(id, email) values (new.id, lower(new.email)); return new; end $$;
+create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
+
+create table public.projects (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(name) between 1 and 100),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create index projects_owner_idx on public.projects(owner_id);
+
+create table public.project_members (
+  project_id uuid not null references public.projects(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  primary key (project_id, user_id)
+);
+create index project_members_user_idx on public.project_members(user_id);
+
+create table public.roles (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 50),
+  assignee_id uuid,
+  unique (id, project_id),
+  foreign key (project_id, assignee_id) references public.project_members(project_id, user_id) on delete set null (assignee_id)
+);
+create index roles_project_idx on public.roles(project_id);
+
+create table public.tasks (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 200),
+  role_id uuid,
+  status text not null default 'todo' check (status in ('todo', 'in_progress', 'done')),
+  due_date date,
+  created_at timestamptz not null default now(),
+  foreign key (role_id, project_id) references public.roles(id, project_id) on delete set null (role_id)
+);
+create index tasks_project_idx on public.tasks(project_id);
+create index tasks_role_idx on public.tasks(role_id);
+
+create function public.is_member(p uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from project_members where project_id = p and user_id = auth.uid()) $$;
+create function public.is_owner(p uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from projects where id = p and owner_id = auth.uid()) $$;
+
+create function public.add_owner_membership() returns trigger language plpgsql security definer set search_path = public as $$
+begin insert into project_members(project_id, user_id) values (new.id, new.owner_id); return new; end $$;
+create trigger on_project_created after insert on public.projects for each row execute function public.add_owner_membership();
+
+create function public.add_member(p uuid, member_email text) returns uuid language plpgsql security definer set search_path = public as $$
+declare uid uuid;
+begin
+  if not is_owner(p) then raise exception 'only the project owner can add members' using errcode = '42501'; end if;
+  select id into uid from profiles where email = lower(member_email);
+  if uid is null then raise exception 'user not found' using errcode = 'P0002'; end if;
+  insert into project_members(project_id, user_id) values (p, uid) on conflict do nothing;
+  return uid;
+end $$;
+revoke execute on function public.add_member(uuid, text) from anon, public;
+grant execute on function public.add_member(uuid, text) to authenticated;
+
+-- Members may change status; only the owner may change plan fields (title, due date, role).
+create function public.guard_task_update() returns trigger language plpgsql set search_path = public as $$
+begin
+  if not is_owner(old.project_id) and (new.title is distinct from old.title or new.due_date is distinct from old.due_date
+     or new.role_id is distinct from old.role_id or new.project_id is distinct from old.project_id) then
+    raise exception 'only the project owner can change plan fields' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+create trigger tasks_guard before update on public.tasks for each row execute function public.guard_task_update();
+
+alter table public.profiles enable row level security;
+alter table public.projects enable row level security;
+alter table public.project_members enable row level security;
+alter table public.roles enable row level security;
+alter table public.tasks enable row level security;
+
+create policy profiles_select on public.profiles for select using (
+  id = auth.uid() or exists (select 1 from project_members a join project_members b on a.project_id = b.project_id
+                             where a.user_id = auth.uid() and b.user_id = profiles.id));
+create policy projects_select on public.projects for select using (is_member(id));
+create policy projects_insert on public.projects for insert with check (owner_id = auth.uid());
+create policy projects_update on public.projects for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy projects_delete on public.projects for delete using (owner_id = auth.uid());
+create policy members_select on public.project_members for select using (is_member(project_id));
+create policy roles_select on public.roles for select using (is_member(project_id));
+create policy roles_insert on public.roles for insert with check (is_owner(project_id));
+create policy roles_update on public.roles for update using (is_owner(project_id)) with check (is_owner(project_id));
+create policy roles_delete on public.roles for delete using (is_owner(project_id));
+create policy tasks_select on public.tasks for select using (is_member(project_id));
+create policy tasks_insert on public.tasks for insert with check (is_owner(project_id));
+create policy tasks_update on public.tasks for update using (is_member(project_id)) with check (is_member(project_id));
+create policy tasks_delete on public.tasks for delete using (is_owner(project_id));
+=== src/lib/domain/errors.ts ===
+export type ErrorKind = "invalid" | "unauthorized" | "forbidden" | "not_found" | "rate_limited";
+
+export class DomainError extends Error {
+  constructor(public kind: ErrorKind, message: string) {
+    super(message);
+  }
+}
+=== src/lib/domain/types.ts ===
+import type { TaskStatus } from "./task";
+
+export interface Member { user_id: string; email: string }
+export interface Role { id: string; name: string; assignee_id: string | null }
+export interface Task { id: string; title: string; status: TaskStatus; due_date: string | null; role_id: string | null }
+export interface TaskView extends Task { delayed: boolean }
+export interface ProjectSummary { id: string; name: string; owner_id: string }
+export interface ProjectDetail {
+  project: ProjectSummary;
+  isOwner: boolean;
+  today: string;
+  members: Member[];
+  roles: Role[];
+  tasks: TaskView[];
+}
+=== src/lib/domain/task.ts ===
+export const TASK_STATUSES = ["todo", "in_progress", "done"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+export const STATUS_LABEL: Record<TaskStatus, string> = { todo: "할 일", in_progress: "진행 중", done: "완료" };
+export const DELAYED_LABEL = "지연";
+
+/** Calendar day (YYYY-MM-DD) in the given IANA time zone. */
+export function todayIn(timeZone: string, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+/** Rule: an unfinished task whose due date has passed is delayed. A task due today is not delayed yet. */
+export function isDelayed(task: { status: TaskStatus; due_date: string | null }, today: string): boolean {
+  return task.status !== "done" && task.due_date !== null && task.due_date < today;
+}
+
+export function withDelay<T extends { status: TaskStatus; due_date: string | null }>(tasks: T[], today: string) {
+  return tasks.map((t) => ({ ...t, delayed: isDelayed(t, today) }));
+}
+=== src/lib/domain/permissions.ts ===
+import { DomainError } from "./errors";
+import type { TaskPatch } from "./validate";
+
+/** Rule: only the project creator may assign roles and change due dates (and other plan fields). */
+export function isProjectOwner(ownerId: string, userId: string): boolean {
+  return ownerId === userId;
+}
+
+export function assertOwner(ownerId: string, userId: string): void {
+  if (!isProjectOwner(ownerId, userId)) {
+    throw new DomainError("forbidden", "프로젝트 생성자만 역할과 마감일을 수정할 수 있습니다.");
+  }
+}
+
+/** Status changes are open to members; anything else on a task is a plan change. */
+export function assertCanPatchTask(patch: TaskPatch, ownerId: string, userId: string): void {
+  if ("title" in patch || "due_date" in patch || "role_id" in patch) assertOwner(ownerId, userId);
+}
+=== src/lib/domain/validate.ts ===
+import { DomainError } from "./errors";
+import { TASK_STATUSES, type TaskStatus } from "./task";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const invalid = (m: string) => new DomainError("invalid", m);
+
+export function asObject(v: unknown): Record<string, unknown> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw invalid("요청 본문이 올바르지 않습니다.");
+  return v as Record<string, unknown>;
+}
+export function text(v: unknown, field: string, max: number): string {
+  if (typeof v !== "string") throw invalid(`${field}: 문자열이어야 합니다.`);
+  const t = v.trim();
+  if (!t || t.length > max) throw invalid(`${field}: 1~${max}자여야 합니다.`);
+  return t;
+}
+export function email(v: unknown): string {
+  const e = text(v, "이메일", 254).toLowerCase();
+  if (!EMAIL.test(e)) throw invalid("이메일 형식이 올바르지 않습니다.");
+  return e;
+}
+export function password(v: unknown): string {
+  if (typeof v !== "string" || v.length < 8 || v.length > 72) throw invalid("비밀번호는 8~72자여야 합니다.");
+  return v;
+}
+/** Path ids: a malformed id is treated as "not found". */
+export function pathId(v: unknown): string {
+  if (typeof v !== "string" || !UUID.test(v)) throw new DomainError("not_found", "대상을 찾을 수 없습니다.");
+  return v;
+}
+export function optionalId(v: unknown, field: string): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v !== "string" || !UUID.test(v)) throw invalid(`${field}: 올바른 ID가 아닙니다.`);
+  return v;
+}
+export function optionalDate(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw invalid("마감일은 YYYY-MM-DD 형식이어야 합니다.");
+  const d = new Date(`${v}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) throw invalid("존재하지 않는 날짜입니다.");
+  return v;
+}
+export function status(v: unknown): TaskStatus {
+  if (!TASK_STATUSES.includes(v as TaskStatus)) throw invalid("상태는 할 일, 진행 중, 완료 중 하나여야 합니다.");
+  return v as TaskStatus;
+}
+
+export interface TaskPatch { title?: string; status?: TaskStatus; due_date?: string | null; role_id?: string | null }
+
+export function parseTaskCreate(raw: unknown) {
+  const b = asObject(raw);
+  return { title: text(b.title, "작업명", 200), due_date: optionalDate(b.due_date), role_id: optionalId(b.role_id, "역할") };
+}
+export function parseTaskPatch(raw: unknown): TaskPatch {
+  const b = asObject(raw);
+  const patch: TaskPatch = {};
+  if ("title" in b) patch.title = text(b.title, "작업명", 200);
+  if ("status" in b) patch.status = status(b.status);
+  if ("due_date" in b) patch.due_date = optionalDate(b.due_date);
+  if ("role_id" in b) patch.role_id = optionalId(b.role_id, "역할");
+  if (Object.keys(patch).length === 0) throw invalid("변경할 항목이 없습니다.");
+  return patch;
+}
+=== src/lib/services/supabase.ts ===
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing environment variable ${name}`);
+  return v;
+}
+
+/** Client bound to the caller's session, so Supabase RLS applies to every query. Route handlers only. */
+export async function supabaseForRequest() {
+  const store = await cookies();
+  return createServerClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (list) => list.forEach(({ name, value, options }) => store.set(name, value, options)),
+    },
+  });
+}
+export type Supabase = Awaited<ReturnType<typeof supabaseForRequest>>;
+=== src/lib/services/rateLimit.ts ===
+import { DomainError } from "../domain/errors";
+
+// In-memory, per instance (see docs/decisions.md #7).
+const hits = new Map<string, number[]>();
+
+export function rateLimit(key: string, limit: number, windowMs: number): void {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (recent.length >= limit) throw new DomainError("rate_limited", "요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
+  recent.push(now);
+  hits.set(key, recent);
+}
+=== src/lib/services/repo.ts ===
+import type { PostgrestError } from "@supabase/supabase-js";
+import { DomainError } from "../domain/errors";
+import type { Member, ProjectSummary, Role, Task } from "../domain/types";
+import type { TaskPatch } from "../domain/validate";
+import type { Supabase } from "./supabase";
+
+function must<T>(res: { data: T; error: PostgrestError | null }): T {
+  const { data, error } = res;
+  if (!error) return data;
+  if (error.code === "42501") throw new DomainError("forbidden", "이 작업을 할 권한이 없습니다.");
+  if (error.code === "P0002") throw new DomainError("not_found", "해당 이메일로 가입한 사용자가 없습니다.");
+  if (error.code === "23503") throw new DomainError("invalid", "이 프로젝트에 속하지 않은 멤버나 역할입니다.");
+  throw new Error(`DB error ${error.code}: ${error.message}`);
+}
+
+export async function listProjects(sb: Supabase): Promise<ProjectSummary[]> {
+  return must(await sb.from("projects").select("id,name,owner_id").order("created_at", { ascending: false }));
+}
+export async function createProject(sb: Supabase, ownerId: string, name: string): Promise<ProjectSummary> {
+  return must(await sb.from("projects").insert({ name, owner_id: ownerId }).select("id,name,owner_id").single());
+}
+export async function getProject(sb: Supabase, id: string): Promise<ProjectSummary> {
+  const p = must(await sb.from("projects").select("id,name,owner_id").eq("id", id).maybeSingle());
+  if (!p) throw new DomainError("not_found", "프로젝트를 찾을 수 없거나 접근 권한이 없습니다.");
+  return p;
+}
+export async function getProjectParts(sb: Supabase, id: string) {
+  const [m, r, t] = await Promise.all([
+    sb.from("project_members").select("user_id, profiles(email)").eq("project_id", id),
+    sb.from("roles").select("id,name,assignee_id").eq("project_id", id).order("name"),
+    sb.from("tasks").select("id,title,status,due_date,role_id").eq("project_id", id).order("due_date", { nullsFirst: false }),
+  ]);
+  const members: Member[] = must(m).map((row) => {
+    const p = row.profiles as unknown as { email: string } | null;
+    return { user_id: row.user_id, email: p?.email ?? "(알 수 없음)" };
+  });
+  return { members, roles: must(r) as Role[], tasks: must(t) as Task[] };
+}
+export async function addMember(sb: Supabase, projectId: string, memberEmail: string): Promise<void> {
+  must(await sb.rpc("add_member", { p: projectId, member_email: memberEmail }));
+}
+export async function createRole(sb: Supabase, projectId: string, name: string, assigneeId: string | null): Promise<Role> {
+  return must(await sb.from("roles").insert({ project_id: projectId, name, assignee_id: assigneeId }).select("id,name,assignee_id").single());
+}
+export async function createTask(sb: Supabase, projectId: string, input: Omit<Task, "id" | "status">): Promise<Task> {
+  return must(await sb.from("tasks").insert({ project_id: projectId, ...input }).select("id,title,status,due_date,role_id").single());
+}
+export async function getTaskProjectId(sb: Supabase, taskId: string): Promise<string> {
+  const t = must(await sb.from("tasks").select("project_id").eq("id", taskId).maybeSingle());
+  if (!t) throw new DomainError("not_found", "작업을 찾을 수 없거나 접근 권한이 없습니다.");
+  return t.project_id;
+}
+export async function updateTask(sb: Supabase, taskId: string, patch: TaskPatch): Promise<Task> {
+  return must(await sb.from("tasks").update(patch).eq("id", taskId).select("id,title,status,due_date,role_id").single());
+}
+=== src/lib/server/http.ts ===
+import { NextResponse } from "next/server";
+import { DomainError, type ErrorKind } from "../domain/errors";
+import { asObject } from "../domain/validate";
+import type { Supabase } from "../services/supabase";
+
+const STATUS: Record<ErrorKind, number> = { invalid: 400, unauthorized: 401, forbidden: 403, not_found: 404, rate_limited: 429 };
+
+export async function respond(fn: () => Promise<unknown>): Promise<NextResponse> {
+  try {
+    return NextResponse.json((await fn()) ?? { ok: true });
+  } catch (e) {
+    if (e instanceof DomainError) return NextResponse.json({ error: e.message }, { status: STATUS[e.kind] });
+    console.error(e);
+    return NextResponse.json({ error: "서버 오류가 발생했습니다." }, { status: 500 });
+  }
+}
+export async function jsonBody(req: Request): Promise<Record<string, unknown>> {
+  const raw: unknown = await req.json().catch((e: unknown) => {
+    throw new DomainError("invalid", `JSON 본문이 필요합니다. (${e instanceof Error ? e.message : String(e)})`);
+  });
+  return asObject(raw);
+}
+export async function requireUser(sb: Supabase) {
+  const { data, error } = await sb.auth.getUser();
+  if (error || !data.user) throw new DomainError("unauthorized", "로그인이 필요합니다.");
+  return data.user;
+}
+export function clientIp(req: Request): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+}
+=== src/middleware.ts ===
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+import { env } from "./lib/services/supabase";
+
+// Refreshes the auth cookie on every request so login survives page reloads.
+export async function middleware(req: NextRequest) {
+  let res = NextResponse.next({ request: req });
+  const sb = createServerClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    cookies: {
+      getAll: () => req.cookies.getAll(),
+      setAll: (list) => {
+        list.forEach(({ name, value }) => req.cookies.set(name, value));
+        res = NextResponse.next({ request: req });
+        list.forEach(({ name, value, options }) => res.cookies.set(name, value, options));
+      },
+    },
+  });
+  await sb.auth.getUser();
+  return res;
+}
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+=== src/app/api/auth/[action]/route.ts ===
+import { DomainError } from "@/lib/domain/errors";
+import { email, password } from "@/lib/domain/validate";
+import { clientIp, jsonBody, respond } from "@/lib/server/http";
+import { rateLimit } from "@/lib/services/rateLimit";
+import { supabaseForRequest } from "@/lib/services/supabase";
+
+export async function POST(req: Request, { params }: { params: Promise<{ action: string }> }) {
+  return respond(async () => {
+    const { action } = await params;
+    const sb = await supabaseForRequest();
+    if (action === "logout") {
+      const { error } = await sb.auth.signOut();
+      if (error) throw error;
+      return { ok: true };
+    }
+    if (action !== "login" && action !== "signup") throw new DomainError("not_found", "알 수 없는 요청입니다.");
+    rateLimit(`${action}:${clientIp(req)}`, action === "login" ? 10 : 5, 60_000);
+    const b = await jsonBody(req);
+    const creds = { email: email(b.email), password: password(b.password) };
+    if (action === "login") {
+      rateLimit(`login-email:${creds.email}`, 10, 10 * 60_000);
+      const { error } = await sb.auth.signInWithPassword(creds);
+      if (error) throw new DomainError("unauthorized", "이메일 또는 비밀번호가 올바르지 않습니다.");
+      return { ok: true };
+    }
+    const { data, error } = await sb.auth.signUp(creds);
+    if (error) throw new DomainError("invalid", `회원가입에 실패했습니다: ${error.message}`);
+    return { ok: true, needsConfirmation: !data.session };
+  });
+}
+=== src/app/api/projects/route.ts ===
+import { text } from "@/lib/domain/validate";
+import { jsonBody, requireUser, respond } from "@/lib/server/http";
+import { createProject, listProjects } from "@/lib/services/repo";
+import { supabaseForRequest } from "@/lib/services/supabase";
+
+export async function GET() {
+  return respond(async () => {
+    const sb = await supabaseForRequest();
+    await requireUser(sb);
+    return { projects: await listProjects(sb) };
+  });
+}
+export async function POST(req: Request) {
+  return respond(async () => {
+    const sb = await supabaseForRequest();
+    const user = await requireUser(sb);
+    const name = text((await jsonBody(req)).name, "프로젝트명", 100);
+    return { project: await createProject(sb, user.id, name) };
+  });
+}
+=== src/app/api/projects/[id]/route.ts ===
+import { isProjectOwner } from "@/lib/domain/permissions";
+import { todayIn, withDelay } from "@/lib/domain/task";
+import type { ProjectDetail } from "@/lib/domain/types";
+import { pathId } from "@/lib/domain/validate";
+import { requireUser, respond } from "@/lib/server/http";
+import { getProject, getProjectParts } from "@/lib/services/repo";
+import { supabaseForRequest } from "@/lib/services/supabase";
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async (): Promise<ProjectDetail> => {
+    const id = pathId((await params).id);
+    const sb = await supabaseForRequest();
+    const user = await requireUser(sb);
+    const project = await getProject(sb, id);
+    const { members, roles, tasks } = await getProjectParts(sb, id);
+    const today = todayIn(process.env.APP_TIMEZONE || "Asia/Seoul");
+    return { project, isOwner: isProjectOwner(project.owner_id, user.id), today, members, roles, tasks: withDelay(tasks, today) };
+  });
+}
+=== src/app/api/projects/[id]/[kind]/route.ts ===
+import { DomainError } from "@/lib/domain/errors";
+import { assertOwner } from "@/lib/domain/permissions";
+import { email, optionalId, parseTaskCreate, pathId, text } from "@/lib/domain/validate";
+import { jsonBody, requireUser, respond } from "@/lib/server/http";
+import { addMember, createRole, createTask, getProject } from "@/lib/services/repo";
+import { supabaseForRequest } from "@/lib/services/supabase";
+
+// POST /api/projects/:id/{members|roles|tasks} — all are owner-only plan changes.
+export async function POST(req: Request, { params }: { params: Promise<{ id: string; kind: string }> }) {
+  return respond(async () => {
+    const { id: rawId, kind } = await params;
+    const id = pathId(rawId);
+    const sb = await supabaseForRequest();
+    const user = await requireUser(sb);
+    const project = await getProject(sb, id);
+    assertOwner(project.owner_id, user.id);
+    const b = await jsonBody(req);
+    if (kind === "members") return addMember(sb, id, email(b.email));
+    if (kind === "roles") return { role: await createRole(sb, id, text(b.name, "역할명", 50), optionalId(b.assignee_id, "담당자")) };
+    if (kind === "tasks") return { task: await createTask(sb, id, parseTaskCreate(b)) };
+    throw new DomainError("not_found", "알 수 없는 요청입니다.");
+  });
+}
+=== src/app/api/tasks/[id]/route.ts ===
+import { assertCanPatchTask } from "@/lib/domain/permissions";
+import { parseTaskPatch, pathId } from "@/lib/domain/validate";
+import { jsonBody, requireUser, respond } from "@/lib/server/http";
+import { getProject, getTaskProjectId, updateTask } from "@/lib/services/repo";
+import { supabaseForRequest } from "@/lib/services/supabase";
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async () => {
+    const id = pathId((await params).id);
+    const sb = await supabaseForRequest();
+    const user = await requireUser(sb);
+    const patch = parseTaskPatch(await jsonBody(req));
+    const project = await getProject(sb, await getTaskProjectId(sb, id));
+    assertCanPatchTask(patch, project.owner_id, user.id);
+    return { task: await updateTask(sb, id, patch) };
+  });
+}
+=== src/ui/api.ts ===
+export async function api<T = unknown>(path: string, method = "GET", body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ error: `응답을 읽을 수 없습니다 (${res.status})` }));
+  if (!res.ok) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+  return data as T;
+}
+=== src/ui/useNotice.tsx ===
+"use client";
+import { useState } from "react";
+
+type NoticeState = { ok: boolean; text: string } | null;
+
+/** Runs an action and shows its success or failure; failures are never silent. */
+export function useNotice() {
+  const [notice, setNotice] = useState<NoticeState>(null);
+  async function run(fn: () => Promise<unknown>, okText?: string): Promise<boolean> {
+    try {
+      await fn();
+      setNotice(okText ? { ok: true, text: okText } : null);
+      return true;
+    } catch (e) {
+      setNotice({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
+  }
+  return { notice, run };
+}
+
+export function Notice({ notice }: { notice: NoticeState }) {
+  if (!notice) return null;
+  return <p role="status" className={`my-2 text-sm ${notice.ok ? "text-green-700" : "text-red-700"}`}>{notice.text}</p>;
+}
+=== src/ui/TeamPanel.tsx ===
+"use client";
+import { useState } from "react";
+import type { ProjectDetail } from "@/lib/domain/types";
+import { api } from "./api";
+import { Notice, useNotice } from "./useNotice";
+
+export function TeamPanel({ detail, reload }: { detail: ProjectDetail; reload: () => Promise<void> }) {
+  const { notice, run } = useNotice();
+  const [memberEmail, setMemberEmail] = useState("");
+  const [roleName, setRoleName] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const base = `/api/projects/${detail.project.id}`;
+  const emailOf = (id: string | null) => detail.members.find((m) => m.user_id === id)?.email ?? "미지정";
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-semibold">팀원과 역할</h2>
+      <Notice notice={notice} />
+      <ul className="text-sm">{detail.members.map((m) => <li key={m.user_id}>{m.email}{m.user_id === detail.project.owner_id && " (생성자)"}</li>)}</ul>
+      <ul className="text-sm">{detail.roles.map((r) => <li key={r.id}><b>{r.name}</b> — {emailOf(r.assignee_id)}</li>)}</ul>
+      {detail.isOwner && (
+        <div className="space-y-2">
+          <form className="flex gap-2" onSubmit={async (e) => {
+            e.preventDefault();
+            if (await run(async () => { await api(`${base}/members`, "POST", { email: memberEmail }); await reload(); }, "팀원을 추가했습니다.")) setMemberEmail("");
+          }}>
+            <input className="border px-2" type="email" required placeholder="팀원 이메일" value={memberEmail} onChange={(e) => setMemberEmail(e.target.value)} />
+            <button className="border px-2">팀원 추가</button>
+          </form>
+          <form className="flex gap-2" onSubmit={async (e) => {
+            e.preventDefault();
+            if (await run(async () => { await api(`${base}/roles`, "POST", { name: roleName, assignee_id: assignee || null }); await reload(); }, "역할을 추가했습니다.")) setRoleName("");
+          }}>
+            <input className="border px-2" required maxLength={50} placeholder="역할명" value={roleName} onChange={(e) => setRoleName(e.target.value)} />
+            <select className="border" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">담당자 미지정</option>
+              {detail.members.map((m) => <option key={m.user_id} value={m.user_id}>{m.email}</option>)}
+            </select>
+            <button className="border px-2">역할 추가</button>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+=== src/ui/TaskTable.tsx ===
+"use client";
+import { useState } from "react";
+import { DELAYED_LABEL, STATUS_LABEL, TASK_STATUSES } from "@/lib/domain/task";
+import type { ProjectDetail } from "@/lib/domain/types";
+import { api } from "./api";
+import { Notice, useNotice } from "./useNotice";
+
+export function TaskTable({ detail, reload }: { detail: ProjectDetail; reload: () => Promise<void> }) {
+  const { notice, run } = useNotice();
+  const [form, setForm] = useState({ title: "", due_date: "", role_id: "" });
+  const patch = (id: string, change: Record<string, unknown>, okText: string) =>
+    run(async () => { await api(`/api/tasks/${id}`, "PATCH", change); await reload(); }, okText);
+  const roleOptions = detail.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>);
+  const roleName = (id: string | null) => detail.roles.find((r) => r.id === id)?.name ?? "-";
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-semibold">작업 (기준일 {detail.today})</h2>
+      <Notice notice={notice} />
+      <table className="w-full text-sm">
+        <thead><tr className="text-left"><th>작업</th><th>상태</th><th>마감일</th><th>역할</th></tr></thead>
+        <tbody>
+          {detail.tasks.map((t) => (
+            <tr key={t.id} className={t.delayed ? "bg-red-50" : ""}>
+              <td>{t.title}{t.delayed && <span className="ml-2 rounded bg-red-600 px-1.5 text-xs text-white">{DELAYED_LABEL}</span>}</td>
+              <td>
+                <select className="border" value={t.status} onChange={(e) => patch(t.id, { status: e.target.value }, "상태를 변경했습니다.")}>
+                  {TASK_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                </select>
+              </td>
+              <td>{detail.isOwner
+                ? <input className="border" type="date" value={t.due_date ?? ""} onChange={(e) => patch(t.id, { due_date: e.target.value || null }, "마감일을 변경했습니다.")} />
+                : t.due_date ?? "-"}</td>
+              <td>{detail.isOwner
+                ? <select className="border" value={t.role_id ?? ""} onChange={(e) => patch(t.id, { role_id: e.target.value || null }, "역할을 변경했습니다.")}><option value="">없음</option>{roleOptions}</select>
+                : roleName(t.role_id)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {detail.isOwner && (
+        <form className="flex flex-wrap gap-2" onSubmit={async (e) => {
+          e.preventDefault();
+          const body = { title: form.title, due_date: form.due_date || null, role_id: form.role_id || null };
+          const ok = await run(async () => { await api(`/api/projects/${detail.project.id}/tasks`, "POST", body); await reload(); }, "작업을 추가했습니다.");
+          if (ok) setForm({ title: "", due_date: "", role_id: "" });
+        }}>
+          <input className="border px-2" required maxLength={200} placeholder="작업명" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <input className="border" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+          <select className="border" value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })}><option value="">역할 없음</option>{roleOptions}</select>
+          <button className="border px-2">작업 추가</button>
+        </form>
+      )}
+    </section>
+  );
+}
+=== src/app/globals.css ===
+@import "tailwindcss";
+=== src/app/layout.tsx ===
+import "./globals.css";
+
+export const metadata = { title: "팀 프로젝트 마감·역할" };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko">
+      <body className="mx-auto max-w-3xl p-6">{children}</body>
+    </html>
+  );
+}
+=== src/app/page.tsx ===
+"use client";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { api } from "@/ui/api";
+import { Notice, useNotice } from "@/ui/useNotice";
+
+export default function AuthPage() {
+  const router = useRouter();
+  const { notice, run } = useNotice();
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [creds, setCreds] = useState({ email: "", password: "" });
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await run(async () => {
+      const res = await api<{ needsConfirmation?: boolean }>(`/api/auth/${mode}`, "POST", creds);
+      if (res.needsConfirmation) throw new Error("가입 확인 메일을 보냈습니다. 메일 확인 후 로그인하세요.");
+      router.push("/projects");
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="mx-auto mt-16 flex max-w-sm flex-col gap-2">
+      <h1 className="text-xl font-bold">{mode === "login" ? "로그인" : "회원가입"}</h1>
+      <input className="border p-2" type="email" required placeholder="이메일" value={creds.email} onChange={(e) => setCreds({ ...creds, email: e.target.value })} />
+      <input className="border p-2" type="password" required minLength={8} maxLength={72} placeholder="비밀번호 (8자 이상)" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
+      <button className="border p-2">{mode === "login" ? "로그인" : "가입하기"}</button>
+      <button type="button" className="text-sm underline" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+        {mode === "login" ? "회원가입으로" : "로그인으로"}
+      </button>
+      <Notice notice={notice} />
+    </form>
+  );
+}
+=== src/app/projects/page.tsx ===
+"use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import type { ProjectSummary } from "@/lib/domain/types";
+import { api } from "@/ui/api";
+import { Notice, useNotice } from "@/ui/useNotice";
+
+export default function ProjectsPage() {
+  const router = useRouter();
+  const { notice, run } = useNotice();
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [name, setName] = useState("");
+
+  const load = useCallback(async () => {
+    setProjects((await api<{ projects: ProjectSummary[] }>("/api/projects")).projects);
+  }, []);
+  useEffect(() => { void run(load); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <main className="space-y-4">
+      <div className="flex justify-between">
+        <h1 className="text-xl font-bold">내 프로젝트</h1>
+        <button className="text-sm underline" onClick={() => run(async () => { await api("/api/auth/logout", "POST"); router.push("/"); })}>로그아웃</button>
+      </div>
+      <Notice notice={notice} />
+      <ul>{projects.map((p) => <li key={p.id}><Link className="underline" href={`/projects/${p.id}`}>{p.name}</Link></li>)}</ul>
+      <form className="flex gap-2" onSubmit={async (e) => {
+        e.preventDefault();
+        if (await run(async () => { await api("/api/projects", "POST", { name }); await load(); }, "프로젝트를 만들었습니다.")) setName("");
+      }}>
+        <input className="border px-2" required maxLength={100} placeholder="새 프로젝트 이름" value={name} onChange={(e) => setName(e.target.value)} />
+        <button className="border px-2">만들기</button>
+      </form>
+    </main>
+  );
+}
+=== src/app/projects/[id]/page.tsx ===
+"use client";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import type { ProjectDetail } from "@/lib/domain/types";
+import { api } from "@/ui/api";
+import { TaskTable } from "@/ui/TaskTable";
+import { TeamPanel } from "@/ui/TeamPanel";
+import { Notice, useNotice } from "@/ui/useNotice";
+
+export default function ProjectPage() {
+  const { id } = useParams<{ id: string }>();
+  const { notice, run } = useNotice();
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+
+  const reload = useCallback(async () => {
+    setDetail(await api<ProjectDetail>(`/api/projects/${id}`));
+  }, [id]);
+  useEffect(() => { void run(reload); }, [reload]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <main className="space-y-6">
+      <Link className="text-sm underline" href="/projects">← 프로젝트 목록</Link>
+      <Notice notice={notice} />
+      {detail && (
+        <>
+          <h1 className="text-xl font-bold">{detail.project.name}</h1>
+          {!detail.isOwner && <p className="text-sm text-gray-600">역할과 마감일은 프로젝트 생성자만 수정할 수 있습니다. 작업 상태는 변경할 수 있습니다.</p>}
+          <TeamPanel detail={detail} reload={reload} />
+          <TaskTable detail={detail} reload={reload} />
+        </>
+      )}
+    </main>
+  );
+}

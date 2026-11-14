@@ -1,0 +1,610 @@
+=== .gitignore ===
+node_modules
+.next
+.env
+.env.local
+
+=== .env.example ===
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+=== package.json ===
+{
+  "name": "pt-booking",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": { "typescript": "^5.6.0", "@types/react": "^18.3.0", "@types/node": "^20.0.0" }
+}
+
+=== docs/decisions.md ===
+# Design decisions
+
+1. **Authentication is delegated to Supabase Auth.**
+   Reason: it hashes passwords with bcrypt and issues JWTs, so we never handle plain passwords in storage.
+   Rejected: a custom users table with our own hashing (more code, more risk).
+
+2. **Remaining sessions are derived, never stored.** The view `membership_balance` computes
+   `total_sessions - count(charged reservations)`; charged = `booked`, `late_cancel`, `no_show`, `completed`.
+   Reason: one source of truth; a booked session is reserved upfront, and a day-before cancel (`cancelled`) gives it back.
+   Rejected: a `remaining` counter column (can drift from reservations).
+
+3. **The charged-status definition lives only in the SQL view.** TypeScript reads `remaining` from the view and applies
+   `canBook` / cancellation rules in `src/lib/domain/booking.ts`.
+   Reason: the DB function needs the same number inside a row lock; defining it twice would be copied logic.
+   Rejected: computing remaining in TypeScript and again in SQL.
+
+4. **All writes go through the server with the service-role key; the `book_slot` function locks the membership row.**
+   Reason: prevents two concurrent bookings from both seeing remaining=1 (negative balance), and prevents a client
+   from calling the DB directly to skip the cancellation rule. `authenticated` has SELECT-only RLS policies on its own rows.
+   Rejected: client-side inserts guarded by RLS only (RLS cannot express the lock or the same-day rule).
+
+5. **"Same day" is judged by server time in Asia/Seoul.** Cancel before the lesson's calendar day (KST) = free;
+   on the lesson day = 1 session charged. Past or started lessons cannot be cancelled.
+   Rejected: a 24-hour window (the owner said "전날/당일", i.e. calendar days).
+
+6. **One member per slot is enforced by a partial unique index** on `reservations(slot_id)` for non-`cancelled` rows.
+   Reason: the DB guarantees it even under races. A late-cancelled slot stays taken (the session was charged).
+   Rejected: an app-level check only.
+
+7. **Slots are created by the gym directly in the database** (seeded via SQL). No admin UI is in the build plan.
+   No-show / completed are also set by the gym in the DB.
+
+8. **Login/signup rate limiting is in-memory per IP.** On Vercel each instance has its own memory, so this is a
+   best-effort limit. Source of truth: none (cache-only); entries expire after the window.
+   Rejected for now: Redis/Upstash (adds a paid/external dependency).
+
+=== supabase/schema.sql ===
+create table members (
+  id uuid primary key references auth.users(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 50)
+);
+create table memberships (
+  member_id uuid primary key references members(id) on delete cascade,
+  total_sessions int not null check (total_sessions >= 0)
+);
+create table slots (
+  id uuid primary key default gen_random_uuid(),
+  starts_at timestamptz not null unique,
+  trainer_name text not null
+);
+create table reservations (
+  id uuid primary key default gen_random_uuid(),
+  member_id uuid not null references members(id) on delete cascade,
+  slot_id uuid not null references slots(id),
+  status text not null default 'booked'
+    check (status in ('booked','cancelled','late_cancel','no_show','completed')),
+  created_at timestamptz not null default now()
+);
+-- exactly one member per slot (a free-cancelled slot is released)
+create unique index one_member_per_slot on reservations(slot_id) where status <> 'cancelled';
+
+-- single source of the "remaining sessions" rule (see docs/decisions.md #2, #3)
+create view membership_balance with (security_invoker = true) as
+select m.member_id, m.total_sessions,
+  m.total_sessions - (select count(*) from reservations r
+    where r.member_id = m.member_id
+      and r.status in ('booked','late_cancel','no_show','completed'))::int as remaining
+from memberships m;
+
+alter table members enable row level security;
+alter table memberships enable row level security;
+alter table slots enable row level security;
+alter table reservations enable row level security;
+create policy own_member on members for select to authenticated using (id = auth.uid());
+create policy own_membership on memberships for select to authenticated using (member_id = auth.uid());
+create policy read_slots on slots for select to authenticated using (true);
+create policy own_reservations on reservations for select to authenticated using (member_id = auth.uid());
+-- no insert/update/delete policies: writes happen only via the server (service role)
+
+create function book_slot(p_member uuid, p_slot uuid) returns uuid
+language plpgsql as $$
+declare v_remaining int; v_start timestamptz; v_id uuid;
+begin
+  perform 1 from memberships where member_id = p_member for update; -- serialize per member
+  if not found then raise exception 'NO_MEMBERSHIP'; end if;
+  select remaining into v_remaining from membership_balance where member_id = p_member;
+  if v_remaining <= 0 then raise exception 'NO_SESSIONS'; end if;
+  select starts_at into v_start from slots where id = p_slot;
+  if v_start is null then raise exception 'SLOT_NOT_FOUND'; end if;
+  if v_start <= now() then raise exception 'SLOT_PAST'; end if;
+  insert into reservations(member_id, slot_id) values (p_member, p_slot) returning id into v_id;
+  return v_id;
+exception when unique_violation then raise exception 'SLOT_TAKEN';
+end $$;
+revoke execute on function book_slot(uuid, uuid) from public, anon, authenticated;
+grant execute on function book_slot(uuid, uuid) to service_role;
+
+=== src/lib/domain/booking.ts ===
+// Pure business rules. No UI, no network.
+export const GYM_TIME_ZONE = 'Asia/Seoul';
+
+export type ReservationStatus = 'booked' | 'cancelled' | 'late_cancel' | 'no_show' | 'completed';
+
+export class DomainError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+  }
+}
+
+/** Calendar date (YYYY-MM-DD) in the gym's time zone. */
+export function gymDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: GYM_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d);
+}
+
+/** A member with 0 remaining sessions cannot make a new reservation. */
+export function canBook(remaining: number): boolean {
+  return remaining > 0;
+}
+
+export function assertBookable(remaining: number, slotStart: Date, now: Date): void {
+  if (!canBook(remaining)) throw new DomainError('NO_SESSIONS', '남은 PT 횟수가 없어 예약할 수 없습니다.');
+  if (slotStart.getTime() <= now.getTime()) throw new DomainError('SLOT_PAST', '이미 지난 시간은 예약할 수 없습니다.');
+}
+
+/**
+ * Cancel before the lesson's calendar day: free ('cancelled').
+ * Cancel on the lesson day: 1 session charged ('late_cancel').
+ */
+export function cancellationStatus(status: ReservationStatus, slotStart: Date, now: Date): 'cancelled' | 'late_cancel' {
+  if (status !== 'booked') throw new DomainError('NOT_CANCELLABLE', '취소할 수 없는 예약입니다.');
+  if (slotStart.getTime() <= now.getTime()) throw new DomainError('SLOT_PAST', '이미 시작했거나 지난 예약은 취소할 수 없습니다.');
+  return gymDate(now) < gymDate(slotStart) ? 'cancelled' : 'late_cancel';
+}
+
+export const STATUS_LABEL: Record<ReservationStatus, string> = {
+  booked: '예약됨', cancelled: '취소(미차감)', late_cancel: '당일 취소(차감)', no_show: '노쇼(차감)', completed: '수업 완료',
+};
+
+=== src/lib/server/supabase.ts ===
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { HttpError } from './http';
+
+function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing environment variable ${name}`);
+  return v;
+}
+
+export function anonClient(): SupabaseClient {
+  return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'), { auth: { persistSession: false } });
+}
+
+export function adminClient(): SupabaseClient {
+  return createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
+}
+
+/** Verifies the Bearer token on every request and returns the user id. */
+export async function requireUserId(req: Request): Promise<string> {
+  const token = req.headers.get('authorization')?.replace(/^Bearer /, '');
+  if (!token) throw new HttpError(401, '로그인이 필요합니다.');
+  const { data, error } = await adminClient().auth.getUser(token);
+  if (error || !data.user) throw new HttpError(401, '로그인이 만료되었습니다. 다시 로그인해 주세요.');
+  return data.user.id;
+}
+
+export async function getRemaining(memberId: string): Promise<number> {
+  const { data, error } = await adminClient()
+    .from('membership_balance').select('remaining').eq('member_id', memberId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new HttpError(404, '등록된 회원권이 없습니다.');
+  return data.remaining as number;
+}
+
+=== src/lib/server/http.ts ===
+import { DomainError } from '../domain/booking';
+
+export class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+const DB_ERRORS: Record<string, [number, string]> = {
+  NO_SESSIONS: [409, '남은 PT 횟수가 없어 예약할 수 없습니다.'],
+  NO_MEMBERSHIP: [404, '등록된 회원권이 없습니다.'],
+  SLOT_TAKEN: [409, '이미 다른 회원이 예약한 시간입니다.'],
+  SLOT_NOT_FOUND: [404, '존재하지 않는 시간입니다.'],
+  SLOT_PAST: [409, '이미 지난 시간은 예약할 수 없습니다.'],
+};
+
+/** Wraps a route handler: known errors become JSON messages, unknown ones are logged. */
+export function route(fn: (req: Request, ctx: any) => Promise<Response>) {
+  return async (req: Request, ctx: any) => {
+    try {
+      return await fn(req, ctx);
+    } catch (e: any) {
+      if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+      if (e instanceof DomainError) return Response.json({ error: e.message, code: e.code }, { status: 409 });
+      const known = typeof e?.message === 'string' && DB_ERRORS[e.message];
+      if (known) return Response.json({ error: known[1], code: e.message }, { status: known[0] });
+      console.error('Unhandled API error', e);
+      return Response.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
+    }
+  };
+}
+
+=== src/lib/server/validate.ts ===
+import { HttpError } from './http';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+
+export async function readJson(req: Request): Promise<Record<string, unknown>> {
+  const body = await req.json().catch(() => { throw new HttpError(400, '요청 형식이 올바르지 않습니다.'); });
+  if (typeof body !== 'object' || body === null) throw new HttpError(400, '요청 형식이 올바르지 않습니다.');
+  return body as Record<string, unknown>;
+}
+
+export function str(v: unknown, field: string, min: number, max: number): string {
+  if (typeof v !== 'string' || v.trim().length < min || v.length > max) throw new HttpError(400, `${field} 값이 올바르지 않습니다.`);
+  return v.trim();
+}
+
+export function email(v: unknown): string {
+  const s = str(v, '이메일', 3, 254).toLowerCase();
+  if (!EMAIL.test(s)) throw new HttpError(400, '이메일 형식이 올바르지 않습니다.');
+  return s;
+}
+
+export function uuid(v: unknown, field: string): string {
+  if (typeof v !== 'string' || !UUID.test(v)) throw new HttpError(400, `${field} 값이 올바르지 않습니다.`);
+  return v;
+}
+
+export function date(v: string | null): string {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v) || isNaN(Date.parse(v))) throw new HttpError(400, '날짜 형식이 올바르지 않습니다.');
+  return v;
+}
+
+=== src/lib/server/rateLimit.ts ===
+import { HttpError } from './http';
+
+// Best-effort per-instance limiter (docs/decisions.md #8).
+const hits = new Map<string, { count: number; resetAt: number }>();
+
+export function rateLimit(req: Request, bucket: string, max = 5, windowMs = 60_000): void {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+  const key = `${bucket}:${ip}`;
+  const now = Date.now();
+  const entry = hits.get(key);
+  if (!entry || entry.resetAt < now) { hits.set(key, { count: 1, resetAt: now + windowMs }); return; }
+  entry.count += 1;
+  if (entry.count > max) throw new HttpError(429, '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+}
+
+=== src/app/api/auth/signup/route.ts ===
+import { route, HttpError } from '@/lib/server/http';
+import { readJson, str, email } from '@/lib/server/validate';
+import { rateLimit } from '@/lib/server/rateLimit';
+import { anonClient, adminClient } from '@/lib/server/supabase';
+
+export const POST = route(async (req) => {
+  rateLimit(req, 'signup');
+  const body = await readJson(req);
+  const name = str(body.name, '이름', 1, 50);
+  const mail = email(body.email);
+  const password = str(body.password, '비밀번호', 8, 72);
+  const { data, error } = await anonClient().auth.signUp({ email: mail, password });
+  if (error || !data.user) throw new HttpError(400, error?.message ?? '회원가입에 실패했습니다.');
+  const { error: insertError } = await adminClient().from('members').insert({ id: data.user.id, name });
+  if (insertError) throw insertError;
+  return Response.json({ ok: true }, { status: 201 });
+});
+
+=== src/app/api/auth/login/route.ts ===
+import { route, HttpError } from '@/lib/server/http';
+import { readJson, str, email } from '@/lib/server/validate';
+import { rateLimit } from '@/lib/server/rateLimit';
+import { anonClient } from '@/lib/server/supabase';
+
+export const POST = route(async (req) => {
+  rateLimit(req, 'login');
+  const body = await readJson(req);
+  const { data, error } = await anonClient().auth.signInWithPassword({
+    email: email(body.email), password: str(body.password, '비밀번호', 1, 72),
+  });
+  if (error || !data.session) throw new HttpError(401, '이메일 또는 비밀번호가 올바르지 않습니다.');
+  return Response.json({ token: data.session.access_token });
+});
+
+=== src/app/api/me/route.ts ===
+import { route } from '@/lib/server/http';
+import { adminClient, requireUserId, getRemaining } from '@/lib/server/supabase';
+
+export const GET = route(async (req) => {
+  const memberId = await requireUserId(req);
+  const { data, error } = await adminClient()
+    .from('reservations').select('id, status, slots(starts_at, trainer_name)')
+    .eq('member_id', memberId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return Response.json({ remaining: await getRemaining(memberId), reservations: data });
+});
+
+=== src/app/api/slots/route.ts ===
+import { route } from '@/lib/server/http';
+import { date } from '@/lib/server/validate';
+import { adminClient, requireUserId } from '@/lib/server/supabase';
+
+// Slots of one KST day with whether they are already taken (no other member's identity is exposed).
+export const GET = route(async (req) => {
+  await requireUserId(req);
+  const day = date(new URL(req.url).searchParams.get('date'));
+  const from = new Date(`${day}T00:00:00+09:00`).toISOString();
+  const to = new Date(`${day}T23:59:59+09:00`).toISOString();
+  const { data, error } = await adminClient()
+    .from('slots').select('id, starts_at, trainer_name, reservations(status)')
+    .gte('starts_at', from).lte('starts_at', to).order('starts_at');
+  if (error) throw error;
+  const slots = data.map((s: any) => ({
+    id: s.id, startsAt: s.starts_at, trainer: s.trainer_name,
+    taken: s.reservations.some((r: any) => r.status !== 'cancelled'),
+  }));
+  return Response.json({ slots });
+});
+
+=== src/app/api/reservations/route.ts ===
+import { route, HttpError } from '@/lib/server/http';
+import { readJson, uuid } from '@/lib/server/validate';
+import { adminClient, requireUserId, getRemaining } from '@/lib/server/supabase';
+import { assertBookable } from '@/lib/domain/booking';
+
+export const POST = route(async (req) => {
+  const memberId = await requireUserId(req);
+  const slotId = uuid((await readJson(req)).slotId, 'slotId');
+  const db = adminClient();
+  const { data: slot, error } = await db.from('slots').select('starts_at').eq('id', slotId).maybeSingle();
+  if (error) throw error;
+  if (!slot) throw new HttpError(404, '존재하지 않는 시간입니다.');
+  assertBookable(await getRemaining(memberId), new Date(slot.starts_at), new Date());
+  // book_slot re-checks the balance under a row lock (concurrency guard).
+  const { data: id, error: rpcError } = await db.rpc('book_slot', { p_member: memberId, p_slot: slotId });
+  if (rpcError) throw new Error(rpcError.message);
+  return Response.json({ id }, { status: 201 });
+});
+
+=== src/app/api/reservations/[id]/route.ts ===
+import { route, HttpError } from '@/lib/server/http';
+import { uuid } from '@/lib/server/validate';
+import { adminClient, requireUserId } from '@/lib/server/supabase';
+import { cancellationStatus } from '@/lib/domain/booking';
+
+export const DELETE = route(async (req, ctx: { params: { id: string } }) => {
+  const memberId = await requireUserId(req);
+  const id = uuid(ctx.params.id, '예약 ID');
+  const db = adminClient();
+  const { data: r, error } = await db.from('reservations')
+    .select('status, slots(starts_at)').eq('id', id).eq('member_id', memberId).maybeSingle();
+  if (error) throw error;
+  if (!r) throw new HttpError(404, '예약을 찾을 수 없습니다.');
+  const next = cancellationStatus(r.status, new Date((r.slots as any).starts_at), new Date());
+  const { data: updated, error: updError } = await db.from('reservations')
+    .update({ status: next }).eq('id', id).eq('member_id', memberId).eq('status', 'booked').select('id');
+  if (updError) throw updError;
+  if (!updated?.length) throw new HttpError(409, '이미 처리된 예약입니다.');
+  return Response.json({ status: next });
+});
+
+=== src/services/api.ts ===
+// Client-side API calls. Throws with the server's message so screens can show it.
+const TOKEN_KEY = 'pt_token';
+export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
+export const setToken = (t: string | null) => (t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY));
+
+async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) setToken(null);
+  if (!res.ok) throw new Error(body.error ?? `요청 실패 (${res.status})`);
+  return body as T;
+}
+
+export type Slot = { id: string; startsAt: string; trainer: string; taken: boolean };
+export type Me = { remaining: number; reservations: { id: string; status: any; slots: { starts_at: string; trainer_name: string } }[] };
+
+export const api = {
+  signup: (name: string, email: string, password: string) => call('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) }),
+  login: (email: string, password: string) => call<{ token: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  me: () => call<Me>('/api/me'),
+  slots: (date: string) => call<{ slots: Slot[] }>(`/api/slots?date=${date}`),
+  book: (slotId: string) => call('/api/reservations', { method: 'POST', body: JSON.stringify({ slotId }) }),
+  cancel: (id: string) => call<{ status: string }>(`/api/reservations/${id}`, { method: 'DELETE' }),
+};
+
+=== src/app/layout.tsx ===
+import './globals.css';
+export const metadata = { title: 'PT 예약' };
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko">
+      <head><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+      <body><main>{children}</main></body>
+    </html>
+  );
+}
+
+=== src/app/globals.css ===
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f6f6f6; color: #222; }
+main { max-width: 480px; margin: 0 auto; padding: 16px; }
+input, button { width: 100%; min-height: 44px; font-size: 16px; margin: 4px 0; border-radius: 8px; border: 1px solid #ccc; padding: 0 12px; }
+button { background: #2563eb; color: #fff; border: none; }
+button:disabled { background: #aaa; }
+.row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ddd; }
+.row button { width: auto; padding: 0 16px; }
+.error { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 8px; }
+.notice { background: #e0f2fe; padding: 10px; border-radius: 8px; }
+
+=== src/app/page.tsx ===
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { api, setToken } from '@/services/api';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    try {
+      if (mode === 'signup') await api.signup(name, email, password);
+      setToken((await api.login(email, password)).token);
+      router.push('/book');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <h1>PT 예약</h1>
+      {error && <p className="error" role="alert">{error}</p>}
+      {mode === 'signup' && <input placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />}
+      <input type="email" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input type="password" placeholder="비밀번호 (8자 이상)" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <button type="submit">{mode === 'login' ? '로그인' : '회원가입'}</button>
+      <button type="button" style={{ background: '#666' }} onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+        {mode === 'login' ? '회원가입하기' : '로그인으로'}
+      </button>
+    </form>
+  );
+}
+
+=== src/app/book/page.tsx ===
+'use client';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { api, getToken, Me } from '@/services/api';
+import { Calendar } from '@/components/Calendar';
+import { MyPage } from '@/components/MyPage';
+
+export default function BookPage() {
+  const router = useRouter();
+  const [me, setMe] = useState<Me | null>(null);
+  const [error, setError] = useState('');
+
+  const reload = useCallback(async () => {
+    try {
+      setMe(await api.me());
+      setError('');
+    } catch (err) {
+      setError((err as Error).message);
+      if (!getToken()) router.push('/');
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (!getToken()) router.push('/');
+    else reload();
+  }, [reload, router]);
+
+  return (
+    <>
+      {error && <p className="error" role="alert">{error}</p>}
+      {me && <Calendar remaining={me.remaining} onChanged={reload} onError={setError} />}
+      {me && <MyPage me={me} onChanged={reload} onError={setError} />}
+    </>
+  );
+}
+
+=== src/components/Calendar.tsx ===
+'use client';
+import { useEffect, useState } from 'react';
+import { api, Slot } from '@/services/api';
+import { canBook, gymDate, GYM_TIME_ZONE } from '@/lib/domain/booking';
+
+type Props = { remaining: number; onChanged: () => void; onError: (m: string) => void };
+
+export function Calendar({ remaining, onChanged, onError }: Props) {
+  const [day, setDay] = useState(gymDate(new Date()));
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const allowed = canBook(remaining);
+
+  useEffect(() => {
+    api.slots(day).then((r) => setSlots(r.slots)).catch((e: Error) => onError(e.message));
+  }, [day, onError]);
+
+  async function book(id: string) {
+    try {
+      await api.book(id);
+      setSlots((await api.slots(day)).slots);
+      onChanged();
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  }
+
+  return (
+    <section>
+      <h2>예약하기</h2>
+      <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+      {!allowed && <p className="notice">남은 PT 횟수가 없어 예약할 수 없습니다.</p>}
+      {slots.length === 0 && <p>이 날짜에 열린 시간이 없습니다.</p>}
+      {slots.map((s) => (
+        <div className="row" key={s.id}>
+          <span>
+            {new Date(s.startsAt).toLocaleTimeString('ko-KR', { timeZone: GYM_TIME_ZONE, hour: '2-digit', minute: '2-digit' })} · {s.trainer}
+          </span>
+          <button disabled={s.taken || !allowed} onClick={() => book(s.id)}>{s.taken ? '마감' : '예약'}</button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+=== src/components/MyPage.tsx ===
+'use client';
+import { api, Me } from '@/services/api';
+import { GYM_TIME_ZONE, STATUS_LABEL } from '@/lib/domain/booking';
+
+type Props = { me: Me; onChanged: () => void; onError: (m: string) => void };
+
+export function MyPage({ me, onChanged, onError }: Props) {
+  async function cancel(id: string) {
+    if (!confirm('취소하시겠어요? 수업 당일 취소는 1회 차감됩니다.')) return;
+    try {
+      const r = await api.cancel(id);
+      alert(r.status === 'late_cancel' ? '당일 취소로 1회 차감되었습니다.' : '취소되었습니다. 횟수는 차감되지 않았습니다.');
+      onChanged();
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  }
+
+  return (
+    <section>
+      <h2>마이페이지</h2>
+      <p className="notice">남은 PT 횟수: <strong>{me.remaining}회</strong></p>
+      {me.reservations.length === 0 && <p>예약 내역이 없습니다.</p>}
+      {me.reservations.map((r) => (
+        <div className="row" key={r.id}>
+          <span>
+            {new Date(r.slots.starts_at).toLocaleString('ko-KR', { timeZone: GYM_TIME_ZONE, dateStyle: 'short', timeStyle: 'short' })}
+            {' · '}{r.slots.trainer_name} · {STATUS_LABEL[r.status as keyof typeof STATUS_LABEL]}
+          </span>
+          {r.status === 'booked' && new Date(r.slots.starts_at) > new Date() && (
+            <button onClick={() => cancel(r.id)}>취소</button>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}

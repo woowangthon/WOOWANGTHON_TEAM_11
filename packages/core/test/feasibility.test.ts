@@ -84,3 +84,25 @@ test('a raised verdict carries the rule reason, not the AI reason that argued fo
   assert.equal(f.aiTier, 'personal');
   assert.doesNotMatch(f.why, /1인 개발/);
 });
+
+test('training your own model is not a one-person job, but calling an AI API is', () => {
+  for (const r of [
+    '내 목소리를 학습해서 내 목소리로 노래를 불러주는 AI 앱',
+    '내 그림체를 학습해서 내 그림체로 그림을 그려주는 AI',
+    '경상도 사투리를 알아듣는 음성 비서',
+    '한국 수어를 카메라로 인식해서 자막으로 바꿔주는 앱',
+    '오픈소스 모델을 파인튜닝해서 우리 문서에 답하는 챗봇',
+  ]) {
+    assert.equal(tierFloor(r)?.tier, 'team', r);
+  }
+  for (const r of [
+    '자기소개서를 붙여 넣으면 AI가 첨삭해주는 웹사이트 (ChatGPT API 사용)',
+    'PDF를 올리면 요약해주는 내 개인용 도구',
+    '한국사 학습 퀴즈 앱. AI가 문제를 내줌',
+    '회의 녹음 파일을 올리면 글로 받아써 주는 개인용 도구',
+    '사진 속 글자를 읽어서 텍스트로 바꿔주는 내 개인용 도구',
+    'AI로 그림 그려주는 앱',
+  ]) {
+    assert.equal(tierFloor(r), null, r);
+  }
+});

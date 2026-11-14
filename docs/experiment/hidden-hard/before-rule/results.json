@@ -1,0 +1,1900 @@
+[
+  {
+    "request": "내 목소리를 학습해서 내 목소리로 노래를 불러주는 AI 앱",
+    "kind": "needs-training",
+    "note": "음성 합성 모델 학습",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "개인 음성 데이터로 모델을 학습시키고 로컬이나 개인 서버에서 노래를 생성하는 1인용 툴이므로 혼자서 개발할 수 있습니다.",
+      "risks": [
+        "AI 모델 학습에 필요한 고성능 그래픽카드 자원 부족",
+        "음성 데이터 수집 및 전처리의 복잡성",
+        "생성된 보컬의 음질 저하 및 기계음 발생"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "음성 학습을 위한 원본 오디오는 어떤 방식으로 입력받을 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "노래 생성을 위한 입력 소스는 무엇을 지원할 것인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 모델 학습과 노래 생성은 어디서 실행할 것인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "사용자 계정과 데이터 저장은 어떻게 처리할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "생성된 곡 저장 및 관리",
+        "why": "만든 노래를 나중에 다시 듣거나 비교하려면 저장하고 목록으로 보는 기능이 필수적입니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "오디오 파일 내보내기",
+        "why": "AI가 부른 노래를 MP3 등 표준 오디오 파일로 저장해 외부로 공유하려면 필요합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "목소리 파라미터 미세조정",
+        "why": "음고(피치), 바이브레이션, 호흡 등 세부적인 보컬 톤을 조절하지 못하면 어색한 결과물이 나옵니다.",
+        "difficulty": "hard",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "반주(MR)와 보컬 분리/합성",
+        "why": "기존 노래 위에 목소리를 얹거나 반주와 보컬의 볼륨을 조절하려면 별도의 믹싱 기능이 있어야 합니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "한국 수어를 카메라로 인식해서 자막으로 바꿔주는 앱",
+    "kind": "needs-training",
+    "note": "수어 영상 데이터와 인식 모델",
+    "rep": 0,
+    "source": "fallback",
+    "feasibility": null,
+    "cards": [
+      {
+        "kind": "tech",
+        "question": "어디에서 쓰는 앱인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "로그인이 필요한가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "데이터를 어디에 저장하나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "다음 중 필요한 기능이 있나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "얼마나 많은 사람이 쓰게 될까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디까지 만들 계획인가요?"
+      }
+    ],
+    "features": []
+  },
+  {
+    "request": "우리 반 친구들 얼굴을 알아보고 자동으로 출석 체크하는 프로그램",
+    "kind": "needs-training",
+    "note": "얼굴 인식 정확도와 생체정보",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "team",
+      "why": "얼굴 인식과 영상 처리라는 고난도 기술 요소가 포함되어 있으며, 실제 교실 환경에서의 카메라 각도와 조명 문제 등 예외 상황이 많아 혼자서 완성도 있게 구현하기 까다롭습니다.",
+      "risks": [
+        "얼굴 인식 정확도 저하로 인한 오인식 및 출석 오류",
+        "다수의 얼굴이 동시에 잡혔을 때 처리 성능 한계",
+        "교실 내 카메라 설치 및 실시간 영상 스트리밍 연동의 복잡성"
+      ],
+      "goalAdds": [],
+      "scopeDown": "실시간 자동 인식이 아닌, 사진 한 장을 업로드하여 수동으로 친구 얼굴을 태그하거나 확인하는 방식부터 시작",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "얼굴 인식 실패 시 처리 방법은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "출석 인정 시간 기준은 어떻게 설정할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "프로그램은 어떤 환경에서 실행되나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "얼굴 인식 처리는 어디서 수행하나요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "출석 수동 수정 기능",
+        "why": "얼굴 인식 실패나 오류로 인해 잘못 처리된 출석 기록을 사람이 직접 고칠 수 없으면 프로그램 실사용이 불가능합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "출석 통계 및 조회",
+        "why": "날짜별, 학생별 출석 현황을 모아볼 수 있어야 관리와 활용이 의미를 가집니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "친구 사진 추가 등록",
+        "why": "새로운 친구가 오거나 기존 사진의 인식이 잘 안될 때 새로운 얼굴 데이터를 추가 등록할 수 있어야 합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "출석 상태 상세 분류",
+        "why": "단순 출석/결석 외에 지각, 조퇴 등의 상태를 구분해서 기록해야 실제로 반에서 활용하기 좋습니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "내 그림체를 학습해서 내 그림체로 그림을 그려주는 AI",
+    "kind": "needs-training",
+    "note": "이미지 생성 모델 파인튜닝과 GPU",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "개인 혼자 사용할 목적이며, AI 모델 학습과 추론 기능을 로컬이나 클라우드 API 연동을 통해 구현할 수 있습니다.",
+      "risks": [
+        "AI 모델 학습에 필요한 GPU 자원과 비용 부담",
+        "학습 데이터 품질에 따른 결과물 만족도 차이",
+        "이미지 생성 대기 시간으로 인한 UX 저하"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "학습 데이터의 최소 요구량과 전처리 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "생성된 이미지의 소유권과 공개 범위는 어떻게 설정할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "학습 모델의 관리 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 모델 학습과 이미지 생성은 어디서 실행할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "사용자 로그인 및 인증 방식은 어떻게 할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "생성 이미지 히스토리 및 갤러리",
+        "why": "과거에 생성했던 그림과 사용한 프롬프트를 다시 확인하고 관리하지 못하면 마음에 드는 결과를 잃어버리게 됩니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "프롬프트 및 설정 저장 기능",
+        "why": "매번 똑같은 설정과 프롬프트를 다시 입력하는 번거로움이 생깁니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "이미지 업로드 및 크롭 편집",
+        "why": "학습에 적합한 정사각형 비율 등으로 이미지를 미리 편집하지 못하면 학습 오류가 발생합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "결과물 다운로드 및 해상도 조절",
+        "why": "생성된 이미지를 다양한 크기로 저장하고 공유하는 데 제약이 생깁니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "경상도 사투리를 알아듣는 음성 비서",
+    "kind": "needs-training",
+    "note": "사투리 음성 데이터",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자서 사투리 음성 인식 모델을 연동하고 개인 비서 기능을 테스트하는 목적으로, 복잡한 결제나 백엔드 인프라 없이 AI API 호출 위주로 구현할 수 있습니다.",
+      "risks": [
+        "사투리 억양과 방언의 다양성으로 인한 음성 인식률 저하",
+        "외부 음성 인식 및 대화형 AI API 호출 비용 발생"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "사투리 음성 비서의 응답 톤과 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "음성 비서가 수행할 핵심 기능의 범위는 어디까지인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "음성과 대화 처리를 위해 어떤 방식을 사용할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "앱이 주로 실행될 플랫폼은 어디인가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "대화 기록 저장 및 불러오기",
+        "why": "이전에 나눈 비서와의 대화 내용이 앱을 껐다 켜면 사라져 다시 물어봐야 하는 불편함이 생깁니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "자주 쓰는 명령어 즐겨찾기",
+        "why": "매번 음성으로 말하기 번거로운 사투리 명령어를 버튼 하나로 실행하고 싶을 때 아쉽습니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "표준어 번역 동시 표시",
+        "why": "사투리 명령어가 AI에게 정확히 어떻게 이해되었는지 확인하고 싶을 때 필요합니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "피부 사진을 찍으면 피부 질환인지 알려주는 앱",
+    "kind": "needs-training",
+    "note": "의료 영상 모델과 오진 책임",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "commercial",
+      "tier": "enterprise",
+      "why": "의료적 판단이나 진단을 보조하는 서비스는 오진 시 법적 책임과 규제 대상이 되므로 기업 수준의 검토와 보안이 필요합니다.",
+      "risks": [
+        "AI 판독 오류로 인한 의료법 위반 및 책임 문제",
+        "개인 민감 정보(피부 사진) 유출 보안 사고",
+        "의료기기 소프트웨어 인허가 미비"
+      ],
+      "goalAdds": [
+        "의료법 및 개인정보보호법 준수 검토",
+        "면책 조항(디스클레이머) 및 이용약관 작성",
+        "오판에 대비한 고객 민원 및 책임 대응 체계",
+        "결제 및 이용권 관리 시스템"
+      ],
+      "scopeDown": "실제 진단이나 질환 판독 대신 사용자가 자신의 피부 변화를 기록하고 관리하는 개인용 다이어리 앱으로 축소하면 혼자서도 개발할 수 있습니다.",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 판독 결과의 표현 범위는 어디까지로 할 것인가?"
+      },
+      {
+        "kind": "domain",
+        "question": "사용자 피부 사진 데이터는 어떻게 처리할 것인가?"
+      },
+      {
+        "kind": "tech",
+        "question": "앱은 어떤 형태로 제공할 것인가?"
+      },
+      {
+        "kind": "tech",
+        "question": "피부 사진 분석을 수행할 AI는 어떻게 연동할 것인가?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "면책 조항 동의",
+        "why": "의료 관련 앱은 '의학적 진단을 대체할 수 없다'는 경고 문구와 동의 절차가 없으면 법적 분쟁에 휘말립니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "촬영 가이드라인 안내",
+        "why": "빛이나 각도에 따라 사진 품질이 달라져 분석 정확도가 떨어지므로 올바른 촬영법 안내가 필수적입니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "촬영 히스토리 비교",
+        "why": "시간 경과에 따른 피부 상태 변화를 한눈에 비교할 수 있어야 앱의 지속적인 사용 가치가 생깁니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "병원 찾기 연동",
+        "why": "질환 의심 결과가 나왔을 때 사용자가 곧바로 근처 피부과를 찾을 수 있어야 실용성이 높아집니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "주가를 예측해서 내일 오를 종목을 알려주는 AI",
+    "kind": "needs-training",
+    "note": "예측 모델, 맞는다는 보장 불가",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "commercial",
+      "tier": "enterprise",
+      "why": "타인의 투자 판단에 직접적인 영향을 미치는 주가 예측 및 금융 정보 제공 서비스는 금융 관련 법규 및 면허 요건과 높은 정확도 요구사항을 동반하여 기업 수준의 법적·기술적 검토가 필요합니다.",
+      "risks": [
+        "예측 실패로 인한 사용자 손실 발생 시 책임 공방",
+        "금융당국의 유사투자자문업 또는 투자자문업 규제 저촉",
+        "고비용의 실시간 주식 데이터 수집 및 AI 연산 서버 유지비"
+      ],
+      "goalAdds": [
+        "투자 손실 면책 조항 및 이용약관 작성",
+        "결제 및 구독 플랜 관리",
+        "금융 관련 법적 리스크 대응 체계",
+        "실시간 고객 문의 및 오류 대응"
+      ],
+      "scopeDown": "실제 투자 추천 대신 공공 데이터를 활용한 과거 주가 패턴 시뮬레이션 및 개인 학습용 모의 예측 도구로 축소",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "주가 예측 결과의 공개 범위와 시점은 어떻게 설정할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "투자 실패에 대한 면책 고지와 책임 제한은 어떻게 처리할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "예측 모델의 적중률 성과를 사용자에게 어떻게 공개할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어떤 플랫폼과 환경에서 서비스를 제공할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "주가 데이터와 AI 예측 모델은 어떻게 연동할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "과거 예측 적중률 통계",
+        "why": "사용자가 AI 추천의 신뢰도를 객관적으로 확인할 수 없어 서비스에 대한 의구심을 갖게 될 때 필수적입니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "종목별 리스크 및 변동성 지표",
+        "why": "단순 상승 예측만 제공하면 무분별한 투자를 유발하므로 안전 장치로서 위험도를 함께 안내해야 합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "관심 종목 알림 설정",
+        "why": "매일 앱에 직접 들어와서 확인해야 하는 번거로움을 줄이고 재방문율을 높이기 위해 필요합니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "예측 근거 AI 요약 리포트",
+        "why": "결과만 보여주면 사용자가 맹신하거나 불신하게 되므로, 어떤 지표를 참고했는지 설명이 필요합니다.",
+        "difficulty": "hard",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "농구 경기 영상을 올리면 선수별 슛 성공률을 자동으로 분석해주는 서비스",
+    "kind": "needs-training",
+    "note": "영상 객체 추적 모델",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "commercial",
+      "tier": "team",
+      "why": "동영상 업로드, 고성능 AI 컴퓨터 비전 모델을 통한 슛 감지 및 추적, 다중 사용자 처리 등 복잡한 백엔드와 인프라가 필요합니다.",
+      "risks": [
+        "AI 모델의 슛 인식 정확도가 낮을 경우 서비스 신뢰도 저하",
+        "대용량 영상 처리 및 보관에 따른 서버 비용 급증",
+        "긴 영상 처리 시간으로 인한 사용자 이탈"
+      ],
+      "goalAdds": [
+        "결제 및 이용권 요금제 관리",
+        "이용약관 및 개인정보 처리방침 작성",
+        "영상 처리 실패 및 환불 정책 수립",
+        "고객 문의 및 분석 오류 피드백 대응"
+      ],
+      "scopeDown": "실시간 AI 분석 대신 짧은 클립 영상을 수동으로 구간 지정해 성공 여부만 기록하는 간이 통계 도구로 축소",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 분석 정확도 오류에 대한 정책은 어떻게 둘 것인가?"
+      },
+      {
+        "kind": "domain",
+        "question": "업로드 가능한 영상의 제약 조건은 어떻게 할 것인가?"
+      },
+      {
+        "kind": "domain",
+        "question": "분석 데이터의 보관 기간과 용량은 어떻게 관리할 것인가?"
+      },
+      {
+        "kind": "tech",
+        "question": "어떤 플랫폼과 환경에서 서비스를 제공할 것인가?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "분석 결과 수정 기능",
+        "why": "AI가 슛 성공 여부를 잘못 판단했을 때 사용자가 직접 수정하지 못하면 데이터 신뢰도가 떨어집니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "클립 영상 다운로드",
+        "why": "선수별로 슛 성공 및 실패 장면만 모아 편집된 영상을 보거나 공유하고 싶을 때 찾게 됩니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "팀 및 선수 관리",
+        "why": "여러 팀과 선수의 기록을 체계적으로 관리하려면 선수 이름을 지정하고 매칭하는 기능이 필수적입니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "분석 이력 및 리포트 공유",
+        "why": "팀원이나 코칭스태프에게 분석 결과를 링크로 공유하여 쉽게 보여줄 수 있어야 합니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "자기소개서를 붙여 넣으면 AI가 첨삭해주는 웹사이트 (ChatGPT API 사용)",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "개인 사용자가 간단히 자소서를 붙여넣고 AI 피드백을 받는 웹툴이므로 혼자서 며칠 내에 구현할 수 있습니다.",
+      "risks": [
+        "ChatGPT API 호출 비용 관리 누락",
+        "긴 자소서 입력 시 토큰 초과 오류",
+        "프롬프트 결과물이 일관되지 않음"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 첨삭 요청 시 어떤 입력 형식을 지원할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "AI의 첨삭 결과는 어떤 형태로 제공할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "첨삭 결과를 저장하고 관리하는 방식은 무엇인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "사용자 인증 및 로그인 기능이 필요한가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "API 키는 어디서 관리할 것인가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "첨삭 히스토리 저장",
+        "why": "이전에 수정했던 자소서 버전을 다시 확인하고 비교하고 싶을 때 없으면 불편합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "마크다운/텍스트 내보내기",
+        "why": "AI가 수정한 내용을 파일로 다운로드하지 못하면 매번 복사해서 붙여넣어야 합니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "첨삭 관점 선택 (어조, 항목별)",
+        "why": "단순 오탈자 수정인지, 항목별 강조점 피드백인지 목적에 맞는 결과를 얻기 위해 필요합니다.",
+        "difficulty": "medium",
+        "essential": true
+      }
+    ]
+  },
+  {
+    "request": "PDF를 올리면 요약해주는 내 개인용 도구",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, PDF 텍스트 추출과 인공지능 요약 API 연동만 구현하면 되므로 1인이 단기간에 완성할 수 있습니다.",
+      "risks": [
+        "PDF 파일의 스캔 이미지나 복잡한 레이아웃에서 텍스트를 제대로 추출하지 못할 수 있음",
+        "긴 PDF 파일을 보낼 때 인공지능 모델의 글자 수 제한에 걸릴 수 있음"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "긴 PDF 파일의 요약 처리를 어떻게 할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "스캔된 이미지 형태의 PDF(텍스트 선택이 안 되는 파일)를 어떻게 처리할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하고 데이터를 어떻게 저장할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어떤 인공지능 요약 모델을 사용할 것인가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "요약 결과 복사 및 파일 저장",
+        "why": "요약된 내용을 다른 곳에 활용하거나 기록으로 남기려면 복사 및 다운로드 기능이 필수적입니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "요약 스타일 선택",
+        "why": "한 줄 요약, 개요 형태, 상세 요약 등 사용 목적에 맞는 요약 방식을 고르지 못하면 활용도가 떨어집니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "이전 요약 기록 보관",
+        "why": "전에 요약했던 PDF와 결과를 다시 찾아봐야 할 때 기록이 없으면 불편합니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "다양한 형식으로 내보내기",
+        "why": "요약 결과물을 마크다운이나 텍스트 파일로 저장하고 싶을 때가 생깁니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "영어 일기를 쓰면 문법을 고쳐주는 앱",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자서 영어 일기를 쓰고 문법을 교정받는 용도로, AI API를 활용하면 개인용으로 빠르게 구현할 수 있습니다.",
+      "risks": [
+        "AI API 호출 비용 및 응답 속도 문제",
+        "문법 교정 정확도 한계",
+        "일기 데이터 백업 부실로 인한 유실"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "문법 교정 결과는 어떻게 사용자에게 보여줄까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "일기 작성 및 수정 시 원본 보존 범위는 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "교정 요청은 어떤 시점에 실행할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행되는 앱으로 만들까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "작성한 일기와 교정 데이터는 어디에 저장할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "문법 교정을 위해 어떤 외부 서비스를 연동할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "일기 목록 및 날짜별 필터링",
+        "why": "과거에 쓴 일기를 날짜별로 찾아보지 못하면 학습 성과를 확인하기 어려워집니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "교정 전후 비교 뷰",
+        "why": "어떤 부분이 어떻게 틀렸는지 시각적으로 확인하지 못하면 영어 학습 효과가 크게 떨어집니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "작성 중 임시 저장",
+        "why": "일기를 길게 쓰다가 브라우저를 닫거나 새로고침하면 작성 중인 내용이 전부 사라집니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "단어장 및 표현 스크랩",
+        "why": "교정된 문장에서 유용한 표현을 따로 모아두고 복습하는 기능이 없으면 반복 학습이 어렵습니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "사진 속 글자를 읽어서 텍스트로 바꿔주는 내 개인용 도구",
+    "kind": "api-enough",
+    "note": "OCR API",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, 사진 업로드 후 텍스트를 추출하는 핵심 기능은 AI 코딩 agent와 함께 단기간에 구현할 수 있습니다.",
+      "risks": [
+        "인식률이 떨어지는 손글씨나 저화질 이미지에서의 추출 오류",
+        "긴 글자나 복잡한 레이아웃의 문서 정렬 문제"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "텍스트 추출(OCR)은 어떤 방식으로 처리할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "추출한 텍스트 결과는 어떻게 보관할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "지원할 이미지 형식과 크기 제한은 어떻게 할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "이 앱은 어디서 실행되나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "로그인이 필요한가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "추출된 텍스트 클립보드 복사",
+        "why": "텍스트를 변환한 뒤 바로 복사해서 다른 곳에 붙여넣을 일이 많아 없으면 매번 드래그해야 합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "최근 변환 기록 저장",
+        "why": "전에 변환했던 텍스트를 다시 확인하고 싶을 때 기록이 없으면 사진을 다시 올려야 합니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "추출 텍스트 간단 편집",
+        "why": "OCR 인식 오류로 잘못된 글자가 있을 때 앱 안에서 바로 수정할 수 있어야 편리합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "다크 모드",
+        "why": "밤이나 어두운 곳에서 화면을 볼 때 눈이 부시지 않도록 기본 제공되는 편이 좋습니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "회의 녹음 파일을 올리면 글로 받아써 주는 개인용 도구",
+    "kind": "api-enough",
+    "note": "음성 인식 API",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, 외부 음성 인식 API를 활용하면 AI 코딩 agent와 함께 단기간에 구현할 수 있습니다.",
+      "risks": [
+        "긴 녹음 파일 처리 시 API 타임아웃 발생 가능",
+        "음성 품질에 따른 텍스트 정확도 저하",
+        "대용량 오디오 파일 업로드 시 로컬 저장소 부족"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "변환된 회의록 데이터는 어디에 얼마나 오래 보관하나요?"
+      },
+      {
+        "kind": "domain",
+        "question": "지원할 회의 녹음 파일의 최대 크기와 형식을 어떻게 제한할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "음성 인식을 처리하는 방식을 선택하세요."
+      },
+      {
+        "kind": "tech",
+        "question": "이 도구를 실행하고 접근하는 방식을 선택하세요."
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "텍스트 편집 및 수정",
+        "why": "음성 인식 결과에 오타나 잘못 인식된 단어가 있을 때 바로 수정할 수 없어 불편합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "텍스트 파일 다운로드",
+        "why": "변환된 회의록을 다른 곳에 공유하거나 보관하려면 TXT나 PDF 파일로 내보내는 기능이 필수적입니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "변환 기록 목록 및 검색",
+        "why": "이전에 변환했던 회의록들이 쌓였을 때 원하는 내용을 찾거나 다시 확인하기 어렵습니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "오디오 재생 구간 동기화",
+        "why": "텍스트의 특정 문장을 클릭했을 때 해당 위치의 음성 녹음을 다시 듣고 싶을 때가 많습니다.",
+        "difficulty": "hard",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "냉장고에 있는 재료를 적으면 AI가 레시피를 추천해주는 앱",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 0,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "개인이 직접 사용할 목적으로 냉장고 재료를 입력하고 AI API를 통해 레시피를 추천받는 구조로, 혼자서 며칠 안에 구현할 수 있습니다.",
+      "risks": [
+        "AI API 호출 비용 및 응답 시간 지연",
+        "재료 명칭 불일치로 인한 추천 정확도 저하"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "재료 입력 방식은 어떻게 처리할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "AI 레시피 추천 시 알레르기나 선호도 조건을 반영할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "추천받은 레시피의 기록은 어떻게 관리할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하는 앱인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 모델은 어떻게 연결할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "자주 쓰는 재료 즐겨찾기",
+        "why": "매번 같은 재료를 타이핑으로 입력하는 번거로움을 줄이기 위해 금방 찾게 됩니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f2",
+        "name": "레시피 북마크 및 메모",
+        "why": "마음에 드는 레시피를 저장하고 나만의 팁을 기록해 두는 기능이 없으면 다시 찾기 어렵습니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "대체 재료 제안",
+        "why": "냉장고에 없는 재료가 레시피에 포함되어 있을 때 무엇으로 대체할 수 있는지 궁금해집니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "유통기한 임박 재료 우선 추천",
+        "why": "상하기 쉬운 재료를 먼저 소모할 수 있는 레시피를 원하게 됩니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "내 목소리를 학습해서 내 목소리로 노래를 불러주는 AI 앱",
+    "kind": "needs-training",
+    "note": "음성 합성 모델 학습",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "team",
+      "why": "AI 모델 학습과 보컬 변환(Voice Conversion) 파이프라인 구축은 고성능 GPU 서버와 전문 라이브러리 연동이 필요하여 개인 개발자가 단기간에 완성하기 매우 까다롭습니다.",
+      "risks": [
+        "음성 학습 데이터 품질에 따른 결과물 품질 편차",
+        "실시간 처리가 아닌 경우 긴 렌더링(생성) 대기 시간",
+        "타인의 음성 무단 도용 및 저작권 관련 법적 리스크"
+      ],
+      "goalAdds": [],
+      "scopeDown": "실시간 변환 대신 기존 음원 파일(.mp3, .wav)을 업로드하여 지정된 목소리로 변환하고 다운로드하는 기능으로 범위를 축소합니다.",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "음성 학습 데이터의 저장 및 관리 범위는 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "생성된 음원의 소유권과 이용 범위는 어떻게 규정할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "애플리케이션은 어떤 플랫폼에서 실행되나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 모델 연동 방식은 어떻게 구성할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "오디오 미리듣기 및 구간 반복",
+        "why": "변환된 결과물의 특정 구간만 빠르게 확인하고 수정할 수 없어 전체를 다시 생성해야 하는 번거로움이 생깁니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "변환 결과물 히스토리 관리",
+        "why": "이전에 생성했던 음원 파일들이 저장되지 않아 마음에 드는 결과물을 다시 찾거나 비교하기 어렵습니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "노래방 음원(반주/목소리) 분리",
+        "why": "일반 노래 파일로 바로 학습을 시도하면 기존 보컬과 섞여 음성 학습 품질이 크게 떨어집니다.",
+        "difficulty": "hard",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "음정(Pitch) 및 박자 보정 기능",
+        "why": "AI가 변환 과정에서 음정이 어긋나거나 박자가 밀렸을 때 이를 수동으로 교정할 방법이 없습니다.",
+        "difficulty": "hard",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "한국 수어를 카메라로 인식해서 자막으로 바꿔주는 앱",
+    "kind": "needs-training",
+    "note": "수어 영상 데이터와 인식 모델",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "team",
+      "why": "수어 인식은 고성능 인공지능 모델 학습과 실시간 영상 처리 기술이 필요하여 1인 개발과 AI 에이전트만으로는 구현과 정확도 확보가 매우 어렵습니다.",
+      "risks": [
+        "수어 데이터셋 부족으로 인한 인식률 저하",
+        "실시간 영상 처리 시 발생하는 기기 발열 및 지연 시간",
+        "다양한 조명과 각도에 따른 인식 오류"
+      ],
+      "goalAdds": [],
+      "scopeDown": "실시간 카메라 인식 대신 사용자가 미리 촬영한 짧은 수어 영상을 업로드하면 결과를 보여주는 웹 프로토타입으로 축소",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "인식된 자막의 처리 방식과 오류 교정은 어떻게 다룰까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "수어 모델이 인식하지 못하는 동작이나 단어는 어떻게 처리할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "앱이 실행되는 플랫폼과 구동 환경은 어떻게 할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "수어 인식 AI 모델은 어디서 구동할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "인식 결과 수정 및 피드백",
+        "why": "AI가 잘못 인식한 자막을 사용자가 쉽게 수정하거나 신고할 수 없으면 앱의 정확도를 개선하기 어렵습니다.",
+        "difficulty": "hard",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "자막 히스토리 저장",
+        "why": "이전에 변환된 자막 대화 내용을 다시 확인하거나 내보내기 기능이 없으면 소통 기록을 남기기 불편합니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "오프라인 모드",
+        "why": "인터넷 연결이 불안정한 야외에서도 수어 번역 기능을 사용하려면 온디바이스 처리가 필요합니다.",
+        "difficulty": "hard",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "우리 반 친구들 얼굴을 알아보고 자동으로 출석 체크하는 프로그램",
+    "kind": "needs-training",
+    "note": "얼굴 인식 정확도와 생체정보",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "team",
+      "why": "얼굴 인식(AI 모델) 연동과 실시간 카메라 스트리밍 처리는 일반적인 웹/앱 개발보다 기술적 난도가 높아 1인이 AI 에이전트와 구현하기에 구조가 복잡합니다.",
+      "risks": [
+        "조명이나 각도에 따른 얼굴 인식 정확도 저하",
+        "카메라 스트리밍 및 영상 처리 성능 부하",
+        "친구들의 얼굴 사진 수집 및 관리 시 프라이버시 문제"
+      ],
+      "goalAdds": [],
+      "scopeDown": "실시간 카메라 대신 사진 업로드 방식으로 친구 얼굴을 인식하고 수동으로 출석을 확정하는 버전으로 축소",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI가 얼굴을 인식하지 못하거나 착각했을 때의 처리 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "지각과 결석의 판정 기준은 어떻게 정의할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "얼굴 인식에 사용되는 사진 데이터는 어디에 보관할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "프로그램이 실행될 주요 플랫폼은 어디인가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "출석 상태 수동 수정",
+        "why": "AI가 얼굴을 잘못 인식하거나 인식하지 못했을 때 선생님이나 관리자가 직접 출석 상태를 바꿀 수 없으면 프로그램이 무용지물이 됩니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "날짜별 출석 통계 및 내역 조회",
+        "why": "매일 쌓이는 출석 데이터를 월별이나 개인별로 모아보지 못하면 과거 출석 기록을 확인하기 불편합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "친구 얼굴 사진 추가 및 관리",
+        "why": "새로운 친구가 전학 오거나 기존 친구의 사진이 바뀌었을 때 쉽게 등록하고 삭제하는 관리 기능이 없으면 AI가 사람을 알아보지 못합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "출석 완료 알림 또는 시각적 효과",
+        "why": "카메라 앞에서 출석이 정상적으로 체크되었는지 화면에 피드백이 없으면 사용자가 체크되었는지 알기 어렵습니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "내 그림체를 학습해서 내 그림체로 그림을 그려주는 AI",
+    "kind": "needs-training",
+    "note": "이미지 생성 모델 파인튜닝과 GPU",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "개인용으로 직접 사용할 그림체 학습 및 이미지 생성 도구이므로, 1인 개발과 AI 코딩 툴을 통해 구현할 수 있습니다.",
+      "risks": [
+        "AI 모델 학습에 필요한 고성능 GPU 서버 비용 및 환경 구축의 복잡성",
+        "학습 데이터 품질에 따른 결과물 화풍 일치도 저하"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "그림체 학습(LoRA 등)에 필요한 데이터 세트의 최소 구성과 전처리 방식을 어떻게 할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "이미지 생성 시 프롬프트 입력과 제어 권한을 어느 수준까지 제공할 것인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 모델 학습과 이미지 생성을 처리할 연산 장치는 어디서 실행하나요?"
+      },
+      {
+        "kind": "tech",
+        "question": "생성된 이미지와 학습 데이터를 어디에 저장하고 관리할 것인가요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "생성된 이미지 갤러리 및 기록",
+        "why": "마음에 드는 결과물이 나왔을 때 이전 작업물을 확인하고 비교하지 못하면 불편합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "프롬프트 및 설정값 저장",
+        "why": "좋은 결과물을 만들어낸 프롬프트와 세부 설정(스텝 수 등)을 기억하지 못하면 재현이 불가능합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "다양한 해상도 및 비율 조절",
+        "why": "원하는 그림의 구도에 맞춰 이미지 크기를 조절하지 못하면 활용도가 크게 떨어집니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "이미지 업다운로드 일괄 처리",
+        "why": "학습용 이미지나 생성된 이미지를 하나씩 처리해야 하면 관리가 번거롭습니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "경상도 사투리를 알아듣는 음성 비서",
+    "kind": "needs-training",
+    "note": "사투리 음성 데이터",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자서 경상도 사투리 음성 비서를 테스트하고 개인 용도로 사용하기에는 음성 인식 API와 대화형 AI API를 연동하면 충분히 구현 가능합니다.",
+      "risks": [
+        "표준어 중심 음성 인식기의 사투리 인식률 저하",
+        "자연스러운 경상도 억양 음성 합성의 부자연스러움",
+        "API 호출 비용 누적"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "경상도 사투리의 범위와 대응 수준을 어떻게 정할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "음성 인식 실패 시 어떻게 대응할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하는 앱으로 만들까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "음성과 대화 처리를 어떤 방식으로 구현할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "대화 내역 저장 및 다시보기",
+        "why": "이전에 나눈 대화가 사라지면 비서와의 연속적인 맥락을 파악하기 어렵고 피드백을 주기 불편해집니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "자주 쓰는 명령어 단축키",
+        "why": "매번 음성으로 호출하기 번거로운 날씨, 알람 등의 기능을 터치 한 번으로 실행하게 해줍니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "사투리 번역 및 교정 모드",
+        "why": "비서가 알아듣지 못한 경상도 표현을 사용자가 직접 입력해 사전을 학습시킬 수 있습니다.",
+        "difficulty": "hard",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "음성 출력 속도 및 톤 조절",
+        "why": "사용자 취향에 맞춰 친근한 사투리 톤이나 속도를 조절하지 못하면 금방 질리게 됩니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "피부 사진을 찍으면 피부 질환인지 알려주는 앱",
+    "kind": "needs-training",
+    "note": "의료 영상 모델과 오진 책임",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "enterprise",
+      "why": "의료적 진단과 질환 판독 기능을 제공하는 앱은 오진 시 심각한 건강 피해로 이어질 수 있으며, 의료기기 규제 및 민감 의료 데이터 처리가 필요해 법적·규제적 위험이 매우 큽니다.",
+      "risks": [
+        "AI의 오진으로 인한 사용자 건강 피해 및 법적 책임",
+        "민감한 개인 의료 데이터(피부 사진) 유출 보안 문제",
+        "의료기기 소프트웨어 인허가 등 규제 미준수"
+      ],
+      "goalAdds": [],
+      "scopeDown": "실제 의료 진단이나 질환 판독 대신, 개인이 자신의 피부 상태 변화를 기록하고 관리하는 단순 모니터링 일지로 범위를 축소합니다.",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 분석 결과의 표현 방식을 어떻게 설정할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "촬영된 피부 사진의 저장 및 활용 범위는 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "외부 AI 분석 모델을 어떤 방식으로 연동할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "앱이 주로 실행될 플랫폼은 무엇인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "사용자 계정 및 로그인 방식은 어떻게 할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "촬영일자별 피부 기록 비교",
+        "why": "시간에 따른 피부 상태의 호전 여부를 눈으로 직접 비교할 수 없어 앱의 지속 사용성이 떨어집니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "면책 조항 및 의료 경고 안내",
+        "why": "앱의 결과가 의학적 진단을 대체할 수 없음을 명시하지 않으면 법적 분쟁이나 오해의 소지가 생깁니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "촬영 부위 선택 및 메모 기능",
+        "why": "어떤 부위를 언제 찍었는지 기록해 두지 않으면 나중에 사진만 보고 분석 결과를 이해하기 어렵습니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "분석 결과 내보내기",
+        "why": "병원 진료 시 의사에게 그동안의 촬영 기록과 분석 내용을 보여주기 위해 PDF나 이미지로 저장할 기능이 필요합니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "주가를 예측해서 내일 오를 종목을 알려주는 AI",
+    "kind": "needs-training",
+    "note": "예측 모델, 맞는다는 보장 불가",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "commercial",
+      "tier": "enterprise",
+      "why": "금융 상품이나 투자 조언 성격의 예측 서비스를 제공하는 것은 법적 규제와 자본시장법 검토가 필요하며, 실제 금전 손실로 이어질 경우 심각한 책임을 지게 됩니다.",
+      "risks": [
+        "AI 예측 모델의 정확도 확보 실패",
+        "금융 관련 법적 책임 및 규제 미준수",
+        "외부 증권 데이터 API의 비용 및 안정성 문제"
+      ],
+      "goalAdds": [
+        "결제 및 구독 모델 구축",
+        "투자 면책 조항 및 이용약관 작성",
+        "고객 민원 및 손실 책임 대응 체계"
+      ],
+      "scopeDown": "실제 주가 예측 대신 사용자가 가상으로 전략을 입력하고 과거 데이터로 백테스팅만 해보는 개인용 분석 도구로 범위를 줄여야 합니다.",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "주가 예측 결과와 함께 표시할 면책 조항 및 법적 고지의 수준은 어떻게 설정할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "예측 실패에 대한 환불이나 보상 정책을 어떻게 운영할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 예측 모델은 어디서 실행하고 데이터를 처리할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "주가 데이터와 시장 정보는 어떤 방식으로 수집할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "과거 예측 결과 적중률 통계",
+        "why": "예측이 실제로 맞았는지 사용자가 확인할 수 없으면 서비스의 신뢰성을 판단하기 어렵습니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "관심 종목 알림 기능",
+        "why": "매일 앱에 들어와서 확인하지 않고 추천 종목을 받아보려면 푸시 알림이나 이메일 전송 기능이 필수적입니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "투자 면책 팝업 동의",
+        "why": "법적 분쟁을 예방하기 위해 서비스 이용 전 예측 결과에 대한 투자 책임은 사용자 본인에게 있다는 동의를 받아야 합니다.",
+        "difficulty": "easy",
+        "essential": true
+      }
+    ]
+  },
+  {
+    "request": "농구 경기 영상을 올리면 선수별 슛 성공률을 자동으로 분석해주는 서비스",
+    "kind": "needs-training",
+    "note": "영상 객체 추적 모델",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "commercial",
+      "tier": "team",
+      "why": "영상을 업로드하고 AI를 통해 농구 슛 동작을 인식·분석하는 과정은 일반적인 웹 개발을 넘어선 고성능 서버와 AI 모델 연동이 필요하므로 팀 단위의 프로젝트입니다.",
+      "risks": [
+        "AI 모델의 농구 슛 인식 정확도 한계",
+        "고용량 영상 업로드 및 처리 시 서버 비용 증가",
+        "분석 시간에 따른 사용자 이탈"
+      ],
+      "goalAdds": [
+        "결제 및 이용권 요금제 관리",
+        "영상 처리 용량 제한 및 이용약관 작성",
+        "분석 실패 및 오류에 대한 고객 응대",
+        "서버 비용 최적화 및 보안 대책"
+      ],
+      "scopeDown": "클라우드 AI 모델을 직접 구현하는 대신 기존 오픈소스 비전 모델을 활용하고, 하루 분석 건수를 제한하여 1인이 운영할 수 있는 수준으로 축소합니다.",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 분석의 정확도가 낮아 오인식된 경우 어떻게 처리할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "업로드 가능한 영상의 최대 규격은 어떻게 제한할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "선수 식별은 어떤 방식으로 진행할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어떤 플랫폼에서 서비스를 제공할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 영상 분석 처리는 어떻게 구현할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "선수별 하이라이트 영상 클립 생성",
+        "why": "성공률뿐만 아니라 개별 슛 성공 장면만 모아보고 싶을 때 필수적입니다.",
+        "difficulty": "hard",
+        "essential": false
+      },
+      {
+        "id": "f2",
+        "name": "분석 결과 리포트 PDF 내보내기",
+        "why": "코칭 스태프나 팀원들에게 분석 결과를 공유하려면 문서 형태의 내보내기가 반드시 필요합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "분석 이력 및 히스토리 관리",
+        "why": "이전 경기들과의 성공률 변화를 비교하려면 과거 분석 결과 저장소가 필수적입니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "분석 오류 수동 보정 기능",
+        "why": "AI가 슛 성공 여부를 오인식했을 때 사용자가 직접 수정할 수 있어야 신뢰도가 유지됩니다.",
+        "difficulty": "medium",
+        "essential": true
+      }
+    ]
+  },
+  {
+    "request": "자기소개서를 붙여 넣으면 AI가 첨삭해주는 웹사이트 (ChatGPT API 사용)",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자서 사용할 수 있는 웹 기반 자기소개서 AI 첨삭 도구이므로, 1인이 AI 코딩 도구의 도움을 받아 단기간에 구현할 수 있습니다.",
+      "risks": [
+        "ChatGPT API 호출 비용 관리 미흡으로 인한 초과 비용 발생",
+        "긴 자기소개서 텍스트 입력 시 토큰 제한 초과 또는 응답 지연",
+        "프롬프트 설계 미숙으로 인한 뻔하고 만족스럽지 못한 첨삭 결과"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "AI 첨삭 결과의 형태와 피드백 방식을 어떻게 구성할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "사용자가 작성 중인 자기소개서와 첨삭 기록을 어디에 보관할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "ChatGPT API 비용과 사용량을 어떻게 제어할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "첨삭 이력 저장 및 불러오기",
+        "why": "이전에 첨삭받은 내용을 다시 확인하거나 수정할 수 없어 반복 작업이 필요할 때 절실히 아쉬워집니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "마크다운 결과 서식 적용 및 복사",
+        "why": "AI가 준 답변을 일반 텍스트로만 보면 구조가 깨져서 워드나 한글에 옮겨 담을 때 불편합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "첨삭 관점 선택 (직무별, 항목별)",
+        "why": "단순 맞춤법 교정인지, 지원동기 강화인지 목적을 지정하지 않으면 원하는 수준의 깊이 있는 피드백을 받기 어렵습니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "수정본 직접 편집 기능",
+        "why": "AI가 고쳐준 내용을 바탕으로 웹 화면에서 바로 다듬어보고 최종본을 만들 수 있어야 유용합니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "PDF를 올리면 요약해주는 내 개인용 도구",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, PDF 텍스트 추출과 외부 AI API 연동만 구현하면 되므로 1인이 단기간에 완성할 수 있습니다.",
+      "risks": [
+        "PDF 파일의 글자 추출 품질 및 스캔 문서 처리 한계",
+        "긴 PDF 문서 요약 시 AI 모델의 입력 토큰 제한 초과",
+        "AI API 호출 비용 증가"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "긴 PDF 문서가 들어왔을 때 요약 처리 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "요약 결과에 참고한 원본 출처(페이지 번호 등)를 표시할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하고 데이터를 저장할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "AI 요약 기능은 어떤 방식을 사용할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "요약본 마크다운 복사 및 파일 다운로드",
+        "why": "요약된 결과를 다른 곳에 활용하려면 텍스트나 파일로 저장할 수단이 반드시 필요합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "이전 요약 기록 보관함",
+        "why": "전에 요약했던 문서를 다시 찾아보거나 비교해야 할 때 기록이 없으면 매번 다시 PDF를 올려야 합니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f3",
+        "name": "요약 스타일 선택 (간단히/상세히/목차별)",
+        "why": "문서의 성격과 목적에 따라 원하는 요약 형태가 달라지므로 기본 요약만으로는 아쉽게 됩니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "영어 일기를 쓰면 문법을 고쳐주는 앱",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 영어 일기 문법 교정 도구로, 외부 AI API를 활용하여 핵심 기능을 빠르게 구현할 수 있습니다.",
+      "risks": [
+        "AI API 호출 비용 발생",
+        "문법 교정 정확도 한계",
+        "일기 데이터 유실"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "문법 교정 피드백의 상세 수준을 어떻게 제공할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "일기 데이터의 저장 및 관리 방식을 어떻게 할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하고 접속하는 앱인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "사용자 로그인 방식은 어떻게 할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "일기 수정 이력 비교",
+        "why": "원문과 교정된 문장을 나란히 비교하지 않으면 어떤 부분이 어떻게 고쳐졌는지 한눈에 알기 어렵습니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "날짜별 일기 목록 및 검색",
+        "why": "작성한 일기가 쌓였을 때 지난 일기를 찾아보거나 날짜별로 정렬하여 볼 수단이 필요합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "학습용 어휘·표현 하이라이트",
+        "why": "단순 문법 교정을 넘어 새로 배운 표현이나 자주 틀린 문법을 따로 모아 복습하고 싶어집니다.",
+        "difficulty": "medium",
+        "essential": false
+      },
+      {
+        "id": "f4",
+        "name": "외부 파일 내보내기",
+        "why": "작성한 일기와 교정본을 텍스트나 PDF로 백업하거나 다른 곳에 공유하고 싶을 때가 옵니다.",
+        "difficulty": "easy",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "사진 속 글자를 읽어서 텍스트로 바꿔주는 내 개인용 도구",
+    "kind": "api-enough",
+    "note": "OCR API",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, OCR 기능을 라이브러리나 외부 API로 연동하면 1인이 단기간에 구현할 수 있습니다.",
+      "risks": [
+        "흐리거나 흔들린 사진에서 인식률이 떨어질 수 있음",
+        "세로글이나 복잡한 레이아웃은 텍스트 순서가 엉킬 수 있음"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "OCR 처리 방식은 어떻게 할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "추출된 텍스트의 후처리(줄바꿈 정리 등)를 어떻게 할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "어디서 실행하는 프로그램으로 만들까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "변환된 텍스트와 사진 데이터를 어떻게 보관할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "추출 결과 수정 및 편집",
+        "why": "OCR이 100% 정확하지 않아 추출된 텍스트를 바로 고칠 수 있는 편집기가 없으면 불편합니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "텍스트 파일로 내보내기",
+        "why": "추출한 텍스트를 복사해서 붙여넣는 것 외에 txt나 docx 파일로 저장할 수 있어야 활용도가 높아집니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "이전 변환 기록 저장",
+        "why": "전에 변환했던 사진과 텍스트를 다시 찾아봐야 할 때 기록이 없으면 전부 다시 작업해야 합니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "회의 녹음 파일을 올리면 글로 받아써 주는 개인용 도구",
+    "kind": "api-enough",
+    "note": "음성 인식 API",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자 사용하는 개인용 도구이며, 외부 음성 인식 API를 활용하면 1인 개발자가 AI 에이전트와 함께 단기간에 구현할 수 있습니다.",
+      "risks": [
+        "대용량 음성 파일 업로드 시 타임아웃 발생",
+        "외부 STT(음성 인식) API 비용 및 사용량 제한",
+        "변환 결과의 정확도 저하 및 긴 녹음 파일 처리 시간"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "음성 인식 엔진은 어떤 방식을 사용할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "긴 녹음 파일 처리 시 어떻게 분할할 것인가요?"
+      },
+      {
+        "kind": "domain",
+        "question": "화자 분리(누가 말했는지 구분) 기능을 포함할 것인가요?"
+      },
+      {
+        "kind": "tech",
+        "question": "프로그램은 어디서 실행하고 데이터를 어디에 저장할까요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "변환된 텍스트 편집",
+        "why": "음성 인식 결과에 오탈자가 발생했을 때 화면에서 바로 수정하지 못하면 다시 문서로 옮겨 적어야 하는 불편함이 생깁니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f2",
+        "name": "텍스트 파일 내보내기",
+        "why": "변환된 내용을 메모장이나 워드 파일(.txt, .docx 등)로 저장하지 못하면 다른 곳에서 활용하기 어렵습니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "변환 기록 및 보관함",
+        "why": "이전에 변환했던 회의록들을 다시 찾아볼 수 없으면 과거 회의 내용을 확인할 때마다 파일을 다시 올려야 합니다.",
+        "difficulty": "medium",
+        "essential": true
+      },
+      {
+        "id": "f4",
+        "name": "오디오 재생 동기화",
+        "why": "텍스트를 클릭했을 때 해당 구간의 음성이 재생되지 않으면 오탈자를 확인할 때 일일이 소리를 찾아야 합니다.",
+        "difficulty": "hard",
+        "essential": false
+      }
+    ]
+  },
+  {
+    "request": "냉장고에 있는 재료를 적으면 AI가 레시피를 추천해주는 앱",
+    "kind": "api-enough",
+    "note": "LLM API 호출",
+    "rep": 1,
+    "source": "ai",
+    "feasibility": {
+      "goal": "personal",
+      "tier": "personal",
+      "why": "혼자서 냉장고 재료를 입력하고 AI API를 통해 레시피를 받아오는 기능은 며칠 안에 1인 개발이 가능합니다.",
+      "risks": [
+        "AI API 호출 비용 및 응답 속도 지연",
+        "재료 명칭의 불일치로 인한 정확도 저하"
+      ],
+      "goalAdds": [],
+      "scopeDown": "",
+      "raisedBy": null,
+      "by": "ai"
+    },
+    "cards": [
+      {
+        "kind": "domain",
+        "question": "냉장고 재료 입력 방식은 어떻게 처리할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "없는 재료(대체 재료)에 대한 AI의 답변 범위를 어떻게 제한할까요?"
+      },
+      {
+        "kind": "domain",
+        "question": "레시피 추천 시 알레르기나 선호 식단을 고려할까요?"
+      },
+      {
+        "kind": "tech",
+        "question": "이 앱은 어디서 실행되고 어떻게 접속하나요?"
+      }
+    ],
+    "features": [
+      {
+        "id": "f1",
+        "name": "재료 즐겨찾기 및 자주 쓰는 재료",
+        "why": "매번 같은 재료를 타이핑으로 입력하는 번거로움을 없애기 위해 일주일 내로 반드시 필요해집니다.",
+        "difficulty": "easy",
+        "essential": false
+      },
+      {
+        "id": "f2",
+        "name": "레시피 북마크 및 메모",
+        "why": "AI가 추천해 준 마음에 드는 레시피를 저장하고 나만의 수정 팁을 적어두지 않으면 다시 찾기 어렵습니다.",
+        "difficulty": "easy",
+        "essential": true
+      },
+      {
+        "id": "f3",
+        "name": "유통기한 임박 식재료 알림",
+        "why": "냉장고에 재료를 넣어두고 잊어버리는 것을 방지하기 위해 사용자가 가장 먼저 찾게 되는 기능입니다.",
+        "difficulty": "medium",
+        "essential": false
+      }
+    ]
+  }
+]
