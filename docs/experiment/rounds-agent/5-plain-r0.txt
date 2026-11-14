@@ -1,0 +1,368 @@
+=== index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>팀 과제 보드</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>팀 과제 보드</h1>
+    <p class="sub">마감일과 역할 분담을 한 화면에서</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>팀원</h2>
+      <form id="member-form">
+        <input id="member-name" placeholder="이름" required maxlength="20" />
+        <input id="member-role" placeholder="역할 (예: 발표, 자료조사)" maxlength="30" />
+        <button type="submit">추가</button>
+      </form>
+      <ul id="member-list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>과제</h2>
+      <form id="task-form">
+        <input id="task-title" placeholder="할 일" required maxlength="60" />
+        <input id="task-due" type="date" required />
+        <select id="task-owner"></select>
+        <button type="submit">추가</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="view-head">
+        <h2>보기</h2>
+        <div class="tabs">
+          <button data-view="timeline" class="active">마감일순</button>
+          <button data-view="members">팀원별</button>
+        </div>
+      </div>
+      <div id="summary"></div>
+      <div id="view"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== style.css ===
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  background: #f5f6f8;
+  color: #222;
+}
+header { padding: 20px 16px 8px; max-width: 860px; margin: 0 auto; }
+h1 { margin: 0; font-size: 24px; }
+.sub { margin: 4px 0 0; color: #666; }
+main { max-width: 860px; margin: 0 auto; padding: 8px 16px 40px; }
+.panel {
+  background: #fff;
+  border: 1px solid #e2e4e8;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+h2 { margin: 0 0 12px; font-size: 17px; }
+form { display: flex; gap: 8px; flex-wrap: wrap; }
+input, select, button {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #ccd;
+  border-radius: 6px;
+  background: #fff;
+}
+input { flex: 1 1 140px; min-width: 0; }
+button { cursor: pointer; background: #2f6fed; color: #fff; border-color: #2f6fed; }
+button.ghost { background: #fff; color: #444; border-color: #ccd; padding: 4px 8px; }
+ul { list-style: none; padding: 0; margin: 12px 0 0; }
+#member-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid #f0f0f0;
+}
+.role { color: #666; font-size: 14px; margin-left: 6px; }
+.view-head { display: flex; justify-content: space-between; align-items: center; }
+.tabs button { background: #fff; color: #444; border-color: #ccd; }
+.tabs button.active { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+#summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; font-size: 14px; color: #555; }
+.task {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 8px;
+}
+.task .title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.task.done .title { text-decoration: line-through; color: #999; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.badge.overdue { background: #fde2e2; color: #b42318; }
+.badge.soon { background: #fff1d6; color: #9a5b00; }
+.badge.later { background: #e8eefc; color: #2f4fa8; }
+.badge.done { background: #e4f4e8; color: #1f7a3a; }
+.owner { font-size: 13px; color: #555; white-space: nowrap; }
+.member-block { margin-bottom: 16px; }
+.member-block h3 { margin: 0 0 8px; font-size: 15px; }
+.bar { height: 6px; background: #eee; border-radius: 3px; margin-bottom: 8px; overflow: hidden; }
+.bar > div { height: 100%; background: #2f6fed; }
+.empty { color: #888; font-size: 14px; }
+@media (max-width: 560px) {
+  .task { flex-wrap: wrap; }
+  .owner { width: 100%; }
+}
+
+=== app.js ===
+(function () {
+  const KEY = "team-task-board-v1";
+  const UNASSIGNED = "";
+
+  let state = load();
+  let currentView = "timeline";
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.members) && Array.isArray(data.tasks)) return data;
+      }
+    } catch (e) { /* ignore broken storage */ }
+    return { members: [], tasks: [] };
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* storage full or blocked */ }
+  }
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function el(tag, attrs, children) {
+    const node = document.createElement(tag);
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+        else node.setAttribute(k, v);
+      }
+    }
+    (children || []).forEach((c) => c && node.appendChild(c));
+    return node;
+  }
+
+  function todayStart() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function daysLeft(due) {
+    const [y, m, d] = due.split("-").map(Number);
+    const dueDate = new Date(y, m - 1, d);
+    return Math.round((dueDate - todayStart()) / 86400000);
+  }
+
+  function dueBadge(task) {
+    if (task.done) return el("span", { class: "badge done", text: "완료" });
+    const n = daysLeft(task.due);
+    if (n < 0) return el("span", { class: "badge overdue", text: `${-n}일 지남` });
+    if (n === 0) return el("span", { class: "badge soon", text: "오늘 마감" });
+    if (n <= 3) return el("span", { class: "badge soon", text: `D-${n}` });
+    return el("span", { class: "badge later", text: `D-${n}` });
+  }
+
+  function memberName(id) {
+    const m = state.members.find((x) => x.id === id);
+    return m ? m.name : "미배정";
+  }
+
+  function sortedTasks(list) {
+    return list.slice().sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.due.localeCompare(b.due);
+    });
+  }
+
+  // ----- members -----
+  document.getElementById("member-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const nameEl = document.getElementById("member-name");
+    const roleEl = document.getElementById("member-role");
+    const name = nameEl.value.trim();
+    if (!name) return;
+    state.members.push({ id: uid(), name, role: roleEl.value.trim() });
+    nameEl.value = "";
+    roleEl.value = "";
+    save();
+    render();
+  });
+
+  function removeMember(id) {
+    const count = state.tasks.filter((t) => t.owner === id).length;
+    const msg = count
+      ? `이 팀원에게 배정된 과제 ${count}개는 미배정으로 바뀝니다. 삭제할까요?`
+      : "이 팀원을 삭제할까요?";
+    if (!confirm(msg)) return;
+    state.members = state.members.filter((m) => m.id !== id);
+    state.tasks.forEach((t) => { if (t.owner === id) t.owner = UNASSIGNED; });
+    save();
+    render();
+  }
+
+  // ----- tasks -----
+  document.getElementById("task-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const titleEl = document.getElementById("task-title");
+    const dueEl = document.getElementById("task-due");
+    const ownerEl = document.getElementById("task-owner");
+    const title = titleEl.value.trim();
+    if (!title || !dueEl.value) return;
+    state.tasks.push({ id: uid(), title, due: dueEl.value, owner: ownerEl.value, done: false });
+    titleEl.value = "";
+    save();
+    render();
+  });
+
+  function toggleTask(id) {
+    const t = state.tasks.find((x) => x.id === id);
+    if (!t) return;
+    t.done = !t.done;
+    save();
+    render();
+  }
+
+  function reassign(id, owner) {
+    const t = state.tasks.find((x) => x.id === id);
+    if (!t) return;
+    t.owner = owner;
+    save();
+    render();
+  }
+
+  function removeTask(id) {
+    if (!confirm("이 과제를 삭제할까요?")) return;
+    state.tasks = state.tasks.filter((t) => t.id !== id);
+    save();
+    render();
+  }
+
+  function ownerSelect(selected, onChange) {
+    const sel = el("select", { "aria-label": "담당자" });
+    sel.appendChild(el("option", { value: UNASSIGNED, text: "미배정" }));
+    state.members.forEach((m) => {
+      const opt = el("option", { value: m.id, text: m.role ? `${m.name} (${m.role})` : m.name });
+      sel.appendChild(opt);
+    });
+    sel.value = state.members.some((m) => m.id === selected) ? selected : UNASSIGNED;
+    if (onChange) sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+  }
+
+  function taskRow(t, showOwner) {
+    const check = el("input", { type: "checkbox", "aria-label": "완료" });
+    check.checked = t.done;
+    check.addEventListener("change", () => toggleTask(t.id));
+    return el("div", { class: "task" + (t.done ? " done" : "") }, [
+      check,
+      el("span", { class: "title", text: t.title }),
+      el("span", { class: "owner", text: t.due }),
+      dueBadge(t),
+      showOwner ? ownerSelect(t.owner, (v) => reassign(t.id, v)) : null,
+      el("button", { class: "ghost", text: "삭제", onclick: () => removeTask(t.id) }),
+    ]);
+  }
+
+  // ----- views -----
+  function renderMembers() {
+    const list = document.getElementById("member-list");
+    list.replaceChildren();
+    if (!state.members.length) {
+      list.appendChild(el("li", { class: "empty", text: "팀원을 먼저 추가하세요." }));
+    }
+    state.members.forEach((m) => {
+      list.appendChild(el("li", null, [
+        el("span", null, [
+          el("strong", { text: m.name }),
+          el("span", { class: "role", text: m.role || "역할 미정" }),
+        ]),
+        el("button", { class: "ghost", text: "삭제", onclick: () => removeMember(m.id) }),
+      ]));
+    });
+    const holder = document.getElementById("task-owner");
+    const fresh = ownerSelect(holder.value);
+    fresh.id = "task-owner";
+    holder.replaceWith(fresh);
+  }
+
+  function renderSummary() {
+    const s = document.getElementById("summary");
+    const open = state.tasks.filter((t) => !t.done);
+    const overdue = open.filter((t) => daysLeft(t.due) < 0).length;
+    const soon = open.filter((t) => { const n = daysLeft(t.due); return n >= 0 && n <= 3; }).length;
+    const unassigned = open.filter((t) => !state.members.some((m) => m.id === t.owner)).length;
+    s.replaceChildren(
+      el("span", { text: `전체 ${state.tasks.length}` }),
+      el("span", { text: `남은 일 ${open.length}` }),
+      el("span", { text: `마감 지남 ${overdue}` }),
+      el("span", { text: `3일 내 마감 ${soon}` }),
+      el("span", { text: `미배정 ${unassigned}` })
+    );
+  }
+
+  function renderTimeline(view) {
+    if (!state.tasks.length) {
+      view.appendChild(el("p", { class: "empty", text: "아직 과제가 없습니다." }));
+      return;
+    }
+    sortedTasks(state.tasks).forEach((t) => view.appendChild(taskRow(t, true)));
+  }
+
+  function renderByMember(view) {
+    const groups = state.members.map((m) => ({
+      title: m.role ? `${m.name} · ${m.role}` : m.name,
+      tasks: state.tasks.filter((t) => t.owner === m.id),
+    }));
+    const orphan = state.tasks.filter((t) => !state.members.some((m) => m.id === t.owner));
+    if (orphan.length) groups.push({ title: "미배정", tasks: orphan });
+    if (!groups.length) {
+      view.appendChild(el("p", { class: "empty", text: "팀원과 과제를 추가하면 여기에 정리됩니다." }));
+      return;
+    }
+    groups.forEach((g) => {
+      const done = g.tasks.filter((t) => t.done).length;
+      const pct = g.tasks.length ? Math.round((done / g.tasks.length) * 100) : 0;
+      const bar = el("div", { class: "bar" }, [el("div", { style: `width:${pct}%` })]);
+      const block = el("div", { class: "member-block" }, [
+        el("h3", { text: `${g.title} — ${done}/${g.tasks.length} 완료` }),
+        bar,
+      ]);
+      if (!g.tasks.length) block.appendChild(el("p", { class: "empty", text: "배정된 과제 없음" }));
+      sortedTasks(g.tasks).forEach((t) => block.appendChild(taskRow(t, false)));
+      view.appendChild(block);
+    });
+  }
+
+  function render() {
+    renderMembers();
+    renderSummary();
+    const view = document.getElementById("view");
+    view.replaceChildren();
+    if (currentView === "timeline") renderTimeline(view);
+    else renderByMember(view);
+  }
+
+  document.querySelectorAll(".tabs button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      currentView = btn.dataset.view;
+      document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+      render();
+    });
+  });
+
+  render();
+})();

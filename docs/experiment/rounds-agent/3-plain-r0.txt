@@ -1,0 +1,396 @@
+=== package.json ===
+{
+  "name": "campus-textbook-market",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0"
+  }
+}
+
+=== .env.example ===
+# 학교 이메일 도메인 (이 도메인 주소만 가입 가능)
+SCHOOL_DOMAIN=myschool.ac.kr
+SESSION_SECRET=change-me-to-a-long-random-string
+PORT=3000
+
+=== db.js ===
+import Database from 'better-sqlite3';
+
+const db = new Database('market.db');
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  nickname TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  verified INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS verifications (
+  email TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('sell','buy')),
+  title TEXT NOT NULL,
+  course TEXT,
+  price INTEGER NOT NULL CHECK (price >= 0),
+  condition TEXT,
+  body TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','reserved','done')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
+export default db;
+
+=== mailer.js ===
+// 실제 메일 발송은 SMTP 설정 후 교체하세요. 지금은 서버 콘솔에 인증 코드를 출력합니다.
+export async function sendVerificationCode(email, code) {
+  console.log(`[mail] ${email} 인증 코드: ${code} (10분 유효)`);
+}
+
+=== server.js ===
+import express from 'express';
+import session from 'express-session';
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
+import db from './db.js';
+import { sendVerificationCode } from './mailer.js';
+
+const DOMAIN = (process.env.SCHOOL_DOMAIN || 'myschool.ac.kr').toLowerCase();
+const PORT = process.env.PORT || 3000;
+const app = express();
+
+app.use(express.json({ limit: '50kb' }));
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 },
+}));
+app.use(express.static('public'));
+
+const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const isSchoolEmail = (email) => /^[^\s@]+@[^\s@]+$/.test(email) && email.split('@')[1] === DOMAIN;
+
+function requireLogin(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  next();
+}
+
+// ---- 인증 ----
+app.get('/api/config', (req, res) => res.json({ domain: DOMAIN }));
+
+app.post('/api/auth/request-code', async (req, res) => {
+  const email = str(req.body.email, 200).toLowerCase();
+  if (!isSchoolEmail(email)) return res.status(400).json({ error: `@${DOMAIN} 이메일만 가입할 수 있습니다.` });
+  const user = db.prepare('SELECT verified FROM users WHERE email = ?').get(email);
+  if (user?.verified) return res.status(409).json({ error: '이미 가입된 이메일입니다.' });
+  const prev = db.prepare('SELECT expires_at FROM verifications WHERE email = ?').get(email);
+  if (prev && prev.expires_at - 9 * 60e3 > Date.now()) {
+    return res.status(429).json({ error: '1분 후 다시 요청해 주세요.' });
+  }
+  const code = String(crypto.randomInt(100000, 1000000));
+  db.prepare(`INSERT INTO verifications (email, code, expires_at, attempts) VALUES (?, ?, ?, 0)
+    ON CONFLICT(email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at, attempts = 0`)
+    .run(email, code, Date.now() + 10 * 60e3);
+  await sendVerificationCode(email, code);
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/signup', async (req, res) => {
+  const email = str(req.body.email, 200).toLowerCase();
+  const code = str(req.body.code, 10);
+  const nickname = str(req.body.nickname, 20);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!isSchoolEmail(email)) return res.status(400).json({ error: `@${DOMAIN} 이메일만 가입할 수 있습니다.` });
+  if (!nickname) return res.status(400).json({ error: '닉네임을 입력하세요.' });
+  if (password.length < 8) return res.status(400).json({ error: '비밀번호는 8자 이상이어야 합니다.' });
+
+  const v = db.prepare('SELECT * FROM verifications WHERE email = ?').get(email);
+  if (!v || v.expires_at < Date.now()) return res.status(400).json({ error: '인증 코드를 다시 요청하세요.' });
+  if (v.attempts >= 5) return res.status(429).json({ error: '시도 횟수를 넘었습니다. 코드를 다시 요청하세요.' });
+  if (v.code !== code) {
+    db.prepare('UPDATE verifications SET attempts = attempts + 1 WHERE email = ?').run(email);
+    return res.status(400).json({ error: '인증 코드가 틀렸습니다.' });
+  }
+  const existing = db.prepare('SELECT verified FROM users WHERE email = ?').get(email);
+  if (existing?.verified) return res.status(409).json({ error: '이미 가입된 이메일입니다.' });
+
+  const hash = await bcrypt.hash(password, 10);
+  db.prepare(`INSERT INTO users (email, nickname, password_hash, verified) VALUES (?, ?, ?, 1)
+    ON CONFLICT(email) DO UPDATE SET nickname = excluded.nickname, password_hash = excluded.password_hash, verified = 1`)
+    .run(email, nickname, hash);
+  db.prepare('DELETE FROM verifications WHERE email = ?').run(email);
+  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  req.session.regenerate(() => {
+    req.session.userId = user.id;
+    res.json({ ok: true });
+  });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const email = str(req.body.email, 200).toLowerCase();
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  const user = db.prepare('SELECT * FROM users WHERE email = ? AND verified = 1').get(email);
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    return res.status(401).json({ error: '이메일 또는 비밀번호가 틀렸습니다.' });
+  }
+  req.session.regenerate(() => {
+    req.session.userId = user.id;
+    res.json({ ok: true });
+  });
+});
+
+app.post('/api/auth/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
+
+app.get('/api/me', (req, res) => {
+  if (!req.session.userId) return res.json({ user: null });
+  const user = db.prepare('SELECT id, email, nickname FROM users WHERE id = ?').get(req.session.userId);
+  res.json({ user: user || null });
+});
+
+// ---- 게시글 ----
+app.get('/api/posts', requireLogin, (req, res) => {
+  const q = str(req.query.q, 50);
+  const type = ['sell', 'buy'].includes(req.query.type) ? req.query.type : null;
+  const rows = db.prepare(`
+    SELECT p.id, p.type, p.title, p.course, p.price, p.condition, p.status, p.created_at, u.nickname
+    FROM posts p JOIN users u ON u.id = p.user_id
+    WHERE (? IS NULL OR p.type = ?)
+      AND (? = '' OR p.title LIKE ? OR p.course LIKE ?)
+    ORDER BY p.id DESC LIMIT 100`)
+    .all(type, type, q, `%${q}%`, `%${q}%`);
+  res.json({ posts: rows });
+});
+
+app.get('/api/posts/:id', requireLogin, (req, res) => {
+  const post = db.prepare(`SELECT p.*, u.nickname, u.email FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ?`)
+    .get(Number(req.params.id));
+  if (!post) return res.status(404).json({ error: '글이 없습니다.' });
+  const comments = db.prepare(`SELECT c.id, c.body, c.created_at, c.user_id, u.nickname FROM comments c
+    JOIN users u ON u.id = c.user_id WHERE c.post_id = ? ORDER BY c.id`).all(post.id);
+  res.json({ post: { ...post, mine: post.user_id === req.session.userId }, comments });
+});
+
+function readPost(body) {
+  const type = body.type === 'buy' ? 'buy' : 'sell';
+  const title = str(body.title, 100);
+  const price = Number(body.price);
+  if (!title) return { error: '교재명을 입력하세요.' };
+  if (!Number.isInteger(price) || price < 0 || price > 10_000_000) return { error: '가격을 확인하세요.' };
+  return { type, title, price, course: str(body.course, 100), condition: str(body.condition, 30), body: str(body.body, 2000) };
+}
+
+app.post('/api/posts', requireLogin, (req, res) => {
+  const p = readPost(req.body);
+  if (p.error) return res.status(400).json(p);
+  const r = db.prepare(`INSERT INTO posts (user_id, type, title, course, price, condition, body) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(req.session.userId, p.type, p.title, p.course, p.price, p.condition, p.body);
+  res.json({ id: r.lastInsertRowid });
+});
+
+function ownPost(req, res) {
+  const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(Number(req.params.id));
+  if (!post) { res.status(404).json({ error: '글이 없습니다.' }); return null; }
+  if (post.user_id !== req.session.userId) { res.status(403).json({ error: '본인 글만 수정할 수 있습니다.' }); return null; }
+  return post;
+}
+
+app.put('/api/posts/:id', requireLogin, (req, res) => {
+  const post = ownPost(req, res);
+  if (!post) return;
+  const p = readPost(req.body);
+  if (p.error) return res.status(400).json(p);
+  const status = ['open', 'reserved', 'done'].includes(req.body.status) ? req.body.status : post.status;
+  db.prepare(`UPDATE posts SET type=?, title=?, course=?, price=?, condition=?, body=?, status=? WHERE id=?`)
+    .run(p.type, p.title, p.course, p.price, p.condition, p.body, status, post.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/posts/:id', requireLogin, (req, res) => {
+  const post = ownPost(req, res);
+  if (!post) return;
+  db.prepare('DELETE FROM posts WHERE id = ?').run(post.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/posts/:id/comments', requireLogin, (req, res) => {
+  const body = str(req.body.body, 500);
+  if (!body) return res.status(400).json({ error: '내용을 입력하세요.' });
+  const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(Number(req.params.id));
+  if (!post) return res.status(404).json({ error: '글이 없습니다.' });
+  db.prepare('INSERT INTO comments (post_id, user_id, body) VALUES (?, ?, ?)').run(post.id, req.session.userId, body);
+  res.json({ ok: true });
+});
+
+app.listen(PORT, () => console.log(`http://localhost:${PORT} (가입 허용 도메인: @${DOMAIN})`));
+
+=== public/index.html ===
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>교재 장터</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 16px; color: #222; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    input, select, textarea, button { font: inherit; padding: 6px 8px; margin: 4px 0; box-sizing: border-box; }
+    input, select, textarea { width: 100%; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; cursor: pointer; }
+    .muted { color: #777; font-size: 0.9em; }
+    .tag { font-size: 0.8em; padding: 2px 6px; border-radius: 4px; background: #eee; margin-right: 4px; }
+    .error { color: #c00; }
+    .row { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <header><h1>교재 장터</h1><div id="nav"></div></header>
+  <p class="error" id="err"></p>
+  <main id="app"></main>
+  <script src="app.js"></script>
+</body>
+</html>
+
+=== public/app.js ===
+const $app = document.getElementById('app');
+const $err = document.getElementById('err');
+let me = null, domain = '';
+const STATUS = { open: '판매중', reserved: '예약중', done: '거래완료' };
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(path, opts = {}) {
+  $err.textContent = '';
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body && JSON.stringify(opts.body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { $err.textContent = data.error || '오류가 발생했습니다.'; throw new Error(data.error); }
+  return data;
+}
+const val = (id) => document.getElementById(id).value;
+
+function renderNav() {
+  document.getElementById('nav').innerHTML = me
+    ? `${esc(me.nickname)} <button onclick="newPost()">글쓰기</button> <button onclick="logout()">로그아웃</button>`
+    : '';
+}
+
+function showAuth() {
+  $app.innerHTML = `
+    <h2>로그인</h2>
+    <input id="le" placeholder="학교 이메일 (@${esc(domain)})"><input id="lp" type="password" placeholder="비밀번호">
+    <button onclick="login()">로그인</button>
+    <h2>회원가입</h2>
+    <p class="muted">@${esc(domain)} 이메일로만 가입할 수 있습니다.</p>
+    <div class="row"><input id="se" placeholder="학교 이메일"><button onclick="requestCode()">인증 코드 받기</button></div>
+    <input id="sc" placeholder="인증 코드 6자리"><input id="sn" placeholder="닉네임">
+    <input id="sp" type="password" placeholder="비밀번호 (8자 이상)">
+    <button onclick="signup()">가입하기</button>`;
+}
+
+async function requestCode() { await api('/api/auth/request-code', { method: 'POST', body: { email: val('se') } }); alert('인증 코드를 메일로 보냈습니다.'); }
+async function signup() { await api('/api/auth/signup', { method: 'POST', body: { email: val('se'), code: val('sc'), nickname: val('sn'), password: val('sp') } }); await boot(); }
+async function login() { await api('/api/auth/login', { method: 'POST', body: { email: val('le'), password: val('lp') } }); await boot(); }
+async function logout() { await api('/api/auth/logout', { method: 'POST' }); await boot(); }
+
+async function showList() {
+  $app.innerHTML = `
+    <div class="row"><input id="q" placeholder="교재명·과목 검색">
+    <select id="t" style="width:auto"><option value="">전체</option><option value="sell">팝니다</option><option value="buy">삽니다</option></select>
+    <button onclick="loadList()">검색</button></div><div id="list"></div>`;
+  await loadList();
+}
+
+async function loadList() {
+  const { posts } = await api(`/api/posts?q=${encodeURIComponent(val('q'))}&type=${val('t')}`);
+  document.getElementById('list').innerHTML = posts.length ? posts.map((p) => `
+    <div class="card" onclick="showPost(${p.id})">
+      <span class="tag">${p.type === 'sell' ? '팝니다' : '삽니다'}</span><span class="tag">${STATUS[p.status]}</span>
+      <b>${esc(p.title)}</b> · ${p.price.toLocaleString()}원
+      <div class="muted">${esc(p.course)} · ${esc(p.nickname)} · ${esc(p.created_at)}</div>
+    </div>`).join('') : '<p class="muted">글이 없습니다.</p>';
+}
+
+async function showPost(id) {
+  const { post: p, comments } = await api(`/api/posts/${id}`);
+  $app.innerHTML = `
+    <button onclick="showList()">← 목록</button>
+    <h2>${esc(p.title)}</h2>
+    <p><span class="tag">${p.type === 'sell' ? '팝니다' : '삽니다'}</span><span class="tag">${STATUS[p.status]}</span>
+      ${p.price.toLocaleString()}원 · 상태: ${esc(p.condition) || '-'}</p>
+    <p class="muted">과목: ${esc(p.course) || '-'} · ${esc(p.nickname)} · ${esc(p.created_at)}</p>
+    <p style="white-space:pre-wrap">${esc(p.body)}</p>
+    ${p.mine ? `<button onclick="editPost(${p.id})">수정</button> <button onclick="deletePost(${p.id})">삭제</button>` : ''}
+    <h3>댓글</h3>
+    ${comments.map((c) => `<p><b>${esc(c.nickname)}</b> ${esc(c.body)} <span class="muted">${esc(c.created_at)}</span></p>`).join('')}
+    <textarea id="cb" placeholder="거래 문의를 남기세요"></textarea>
+    <button onclick="addComment(${p.id})">댓글 등록</button>`;
+}
+
+async function addComment(id) { await api(`/api/posts/${id}/comments`, { method: 'POST', body: { body: val('cb') } }); showPost(id); }
+async function deletePost(id) { if (confirm('삭제할까요?')) { await api(`/api/posts/${id}`, { method: 'DELETE' }); showList(); } }
+
+function postForm(p = {}) {
+  $app.innerHTML = `
+    <h2>${p.id ? '글 수정' : '글쓰기'}</h2>
+    <select id="ft"><option value="sell">팝니다</option><option value="buy">삽니다</option></select>
+    <input id="fti" placeholder="교재명" value="${esc(p.title)}">
+    <input id="fc" placeholder="과목명 / 교수명" value="${esc(p.course)}">
+    <input id="fp" type="number" min="0" placeholder="가격(원)" value="${esc(p.price)}">
+    <select id="fco"><option>새 책</option><option>깨끗함</option><option>필기 있음</option><option>많이 낡음</option></select>
+    ${p.id ? `<select id="fs"><option value="open">판매중</option><option value="reserved">예약중</option><option value="done">거래완료</option></select>` : ''}
+    <textarea id="fb" rows="6" placeholder="설명 (거래 장소, 연락 방법 등)">${esc(p.body)}</textarea>
+    <button onclick="savePost(${p.id || 0})">저장</button> <button onclick="showList()">취소</button>`;
+  if (p.type) document.getElementById('ft').value = p.type;
+  if (p.condition) document.getElementById('fco').value = p.condition;
+  if (p.status) document.getElementById('fs').value = p.status;
+}
+
+function newPost() { postForm(); }
+async function editPost(id) { const { post } = await api(`/api/posts/${id}`); postForm(post); }
+
+async function savePost(id) {
+  const body = { type: val('ft'), title: val('fti'), course: val('fc'), price: Number(val('fp')), condition: val('fco'), body: val('fb') };
+  if (id) { body.status = val('fs'); await api(`/api/posts/${id}`, { method: 'PUT', body }); showPost(id); }
+  else { const r = await api('/api/posts', { method: 'POST', body }); showPost(r.id); }
+}
+
+async function boot() {
+  domain = (await api('/api/config')).domain;
+  me = (await api('/api/me')).user;
+  renderNav();
+  me ? showList() : showAuth();
+}
+boot();
+
+=== README.md ===
+# 교재 장터
+우리 학교 학생끼리 중고 교재를 사고파는 게시판입니다.
+
+- 실행: `npm install` 후 `SCHOOL_DOMAIN=myschool.ac.kr SESSION_SECRET=... npm start`
+- 가입: 학교 이메일(@SCHOOL_DOMAIN)로 인증 코드를 받아 가입합니다. 지금은 코드가 서버 콘솔에 출력되므로 `mailer.js`를 SMTP 발송으로 바꿔야 실제 운영할 수 있습니다.
+- 기능: 팝니다/삽니다 글쓰기, 검색, 상태(판매중/예약중/거래완료), 댓글로 거래 문의. 로그인한 학생만 글을 볼 수 있습니다.

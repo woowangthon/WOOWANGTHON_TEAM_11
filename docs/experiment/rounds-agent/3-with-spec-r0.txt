@@ -1,0 +1,688 @@
+=== .gitignore ===
+node_modules
+.next
+.env
+.env.local
+
+=== .env.example ===
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SCHOOL_EMAIL_DOMAIN=
+SITE_URL=
+
+=== package.json ===
+{
+  "name": "campus-book-market",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "^15.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": { "typescript": "^5.6.3", "@types/react": "^19.0.0", "@types/node": "^22.9.0" }
+}
+
+=== docs/decisions.md ===
+# Decisions
+
+- **No separate users table; Supabase `auth.users` is the user record.** Reason: a profiles table would copy the email (same fact in two places). Rejected: `public.users` mirror table.
+- **School domain is checked with an exact match on the part after `@`, at signup and again on every API request.** Reason: blocks `evil-school.ac.kr` / `school.ac.kr.evil.com` bypasses and accounts whose email changed. Rejected: `endsWith(domain)` check.
+- **Domain lives only in env `SCHOOL_EMAIL_DOMAIN`; RLS checks "email confirmed" + ownership, the server layer checks the domain.** Reason: one source for the domain. Rejected: copying the domain into a DB settings table for RLS.
+- **Sale status is derived from `sold_at` (null = 판매중).** Reason: no stored status column that can disagree with `sold_at`. Rejected: `status` enum + `sold_at`.
+- **Sold posts stay on the main list and My Page for 30 days after `sold_at` (labelled 판매 완료), then are excluded from both.** Reason: rule "30일간 마이페이지에서 조회 … 이후 메인 목록에서 제외". Rows are not deleted; filtering happens at query time. Rejected: a cron job that deletes/flags rows.
+- **One offer per buyer per post (DB unique constraint), duplicate returns 409.** Reason: prevents duplicate offers even under concurrent requests. Rejected: app-only duplicate check.
+- **Photos go to a private Supabase Storage bucket and are shown through short-lived signed URLs.** Reason: no public write/list; file type is checked by magic bytes on the server, not by the client's MIME header. Rejected: public bucket.
+- **Rate limiting is in-memory per server instance.** Reason: zero-cost; known limit: on Vercel each instance has its own counter. Rejected for now: Redis/Upstash.
+
+=== supabase/schema.sql ===
+create table public.posts (
+  id uuid primary key default gen_random_uuid(),
+  seller_id uuid not null references auth.users(id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 100),
+  description text not null check (char_length(description) <= 2000),
+  price integer not null check (price between 0 and 10000000),
+  allow_offers boolean not null,
+  photo_path text not null,
+  created_at timestamptz not null default now(),
+  sold_at timestamptz
+);
+create table public.offers (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  buyer_id uuid not null references auth.users(id) on delete cascade,
+  amount integer not null check (amount between 1 and 10000000),
+  created_at timestamptz not null default now(),
+  unique (post_id, buyer_id)
+);
+
+create function public.is_confirmed() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from auth.users where id = auth.uid() and email_confirmed_at is not null)
+$$;
+
+alter table public.posts enable row level security;
+alter table public.offers enable row level security;
+
+create policy posts_read on public.posts for select to authenticated using (public.is_confirmed());
+create policy posts_insert on public.posts for insert to authenticated
+  with check (public.is_confirmed() and seller_id = auth.uid() and sold_at is null);
+create policy posts_mark_sold on public.posts for update to authenticated
+  using (seller_id = auth.uid()) with check (seller_id = auth.uid());
+revoke update on public.posts from authenticated;
+grant update (sold_at) on public.posts to authenticated;
+
+create policy offers_read on public.offers for select to authenticated using (
+  buyer_id = auth.uid() or exists (select 1 from public.posts p where p.id = post_id and p.seller_id = auth.uid()));
+create policy offers_insert on public.offers for insert to authenticated with check (
+  public.is_confirmed() and buyer_id = auth.uid() and exists (
+    select 1 from public.posts p where p.id = post_id and p.allow_offers and p.sold_at is null and p.seller_id <> auth.uid()));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('book-photos', 'book-photos', false, 5242880, array['image/jpeg','image/png','image/webp']);
+create policy photos_upload on storage.objects for insert to authenticated with check (
+  bucket_id = 'book-photos' and public.is_confirmed() and (storage.foldername(name))[1] = auth.uid()::text);
+create policy photos_read on storage.objects for select to authenticated using (
+  bucket_id = 'book-photos' and public.is_confirmed());
+
+=== lib/rules/email.ts ===
+export function emailDomain(email: string): string | null {
+  const m = /^[^\s@]+@([a-z0-9.-]+)$/.exec(email.trim().toLowerCase());
+  return m ? m[1] : null;
+}
+
+/** Exact domain match only: subdomains and look-alike suffixes are rejected. */
+export function isSchoolEmail(email: string, schoolDomain: string): boolean {
+  const domain = emailDomain(email);
+  return domain !== null && schoolDomain !== "" && domain === schoolDomain.trim().toLowerCase();
+}
+
+=== lib/rules/validate.ts ===
+export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export function text(raw: unknown, label: string, min: number, max: number): Result<string> {
+  if (typeof raw !== "string") return { ok: false, error: `${label}을(를) 입력해 주세요.` };
+  const v = raw.trim();
+  if (v.length < min || v.length > max) return { ok: false, error: `${label}은(는) ${min}~${max}자여야 합니다.` };
+  return { ok: true, value: v };
+}
+
+export function wholeNumber(raw: unknown, label: string, min: number, max: number): Result<number> {
+  const s = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d+$/.test(s)) return { ok: false, error: `${label}은(는) 숫자로만 입력해 주세요.` };
+  const n = Number(s);
+  if (n < min || n > max) return { ok: false, error: `${label}은(는) ${min}~${max} 사이여야 합니다.` };
+  return { ok: true, value: n };
+}
+
+=== lib/rules/listing.ts ===
+import { Result, text, wholeNumber } from "./validate";
+
+export const SOLD_RETENTION_DAYS = 30;
+export const MAX_PRICE = 10_000_000;
+
+export type ListingInput = { title: string; description: string; price: number; allowOffers: boolean };
+
+export function parseListing(raw: Record<string, unknown>): Result<ListingInput> {
+  const title = text(raw.title, "제목", 1, 100);
+  if (!title.ok) return title;
+  const description = text(raw.description ?? "", "설명", 0, 2000);
+  if (!description.ok) return description;
+  const price = wholeNumber(raw.price, "판매 가격", 0, MAX_PRICE); // price is mandatory
+  if (!price.ok) return price;
+  if (raw.allowOffers !== "true" && raw.allowOffers !== "false")
+    return { ok: false, error: "가격 제안 허용 여부를 선택해 주세요." };
+  return { ok: true, value: { title: title.value, description: description.value, price: price.value, allowOffers: raw.allowOffers === "true" } };
+}
+
+/** Sold posts older than this instant are hidden from the main list and My Page. */
+export function retentionCutoff(now = new Date()): Date {
+  return new Date(now.getTime() - SOLD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+}
+
+export function isVisible(soldAt: string | null, now = new Date()): boolean {
+  return soldAt === null || new Date(soldAt) >= retentionCutoff(now);
+}
+
+export function statusLabel(soldAt: string | null): string {
+  return soldAt === null ? "판매중" : "판매 완료";
+}
+
+=== lib/rules/offer.ts ===
+import { Result, wholeNumber } from "./validate";
+import { MAX_PRICE } from "./listing";
+
+type OfferTarget = { seller_id: string; allow_offers: boolean; sold_at: string | null };
+
+export function offerBlockReason(post: OfferTarget, buyerId: string): string | null {
+  if (post.seller_id === buyerId) return "본인 게시글에는 가격을 제안할 수 없습니다.";
+  if (!post.allow_offers) return "이 게시글은 가격 제안을 받지 않습니다.";
+  if (post.sold_at !== null) return "이미 판매 완료된 게시글입니다.";
+  return null;
+}
+
+export function parseOfferAmount(raw: unknown): Result<number> {
+  return wholeNumber(raw, "제안 가격", 1, MAX_PRICE);
+}
+
+=== lib/rules/upload.ts ===
+export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+const SIGNATURES: { ext: string; mime: string; test: (b: Uint8Array) => boolean }[] = [
+  { ext: "jpg", mime: "image/jpeg", test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { ext: "png", mime: "image/png", test: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+  { ext: "webp", mime: "image/webp", test: (b) => String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP" },
+];
+
+/** Detects the type from file bytes, ignoring the client-supplied MIME type. */
+export function detectImage(bytes: Uint8Array): { ext: string; mime: string } | null {
+  const hit = SIGNATURES.find((s) => s.test(bytes));
+  return hit ? { ext: hit.ext, mime: hit.mime } : null;
+}
+
+=== lib/server/env.ts ===
+export function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing environment variable ${name}`);
+  return v;
+}
+
+=== lib/server/http.ts ===
+export class HttpError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
+  return async (...args: A): Promise<Response> => {
+    try {
+      return await fn(...args);
+    } catch (e) {
+      if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+      console.error(e);
+      return Response.json({ error: "서버 오류가 발생했습니다." }, { status: 500 });
+    }
+  };
+}
+
+export function clientIp(req: Request): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+}
+
+=== lib/server/rateLimit.ts ===
+const hits = new Map<string, number[]>();
+
+/** In-memory sliding window; see docs/decisions.md for the multi-instance limit. */
+export function rateLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (recent.length >= max) { hits.set(key, recent); return false; }
+  recent.push(now);
+  hits.set(key, recent);
+  return true;
+}
+
+=== lib/server/supabase.ts ===
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { env } from "./env";
+
+export async function serverSupabase() {
+  const store = await cookies();
+  return createServerClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (list) => list.forEach(({ name, value, options }) => store.set(name, value, options)),
+    },
+  });
+}
+
+=== lib/server/session.ts ===
+import { User } from "@supabase/supabase-js";
+import { isSchoolEmail } from "../rules/email";
+import { env } from "./env";
+import { HttpError } from "./http";
+import { serverSupabase } from "./supabase";
+
+export function assertMember(user: User) {
+  if (!user.email_confirmed_at) throw new HttpError(403, "학교 메일 인증을 완료해 주세요.");
+  if (!isSchoolEmail(user.email ?? "", env("SCHOOL_EMAIL_DOMAIN")))
+    throw new HttpError(403, "학교 이메일 계정만 이용할 수 있습니다.");
+}
+
+/** Called by every board API: logged in + confirmed + school domain. */
+export async function requireMember() {
+  const supabase = await serverSupabase();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) throw new HttpError(401, "로그인이 필요합니다.");
+  assertMember(data.user);
+  return { supabase, user: data.user };
+}
+
+=== lib/server/posts.ts ===
+import { SupabaseClient } from "@supabase/supabase-js";
+import { retentionCutoff, statusLabel } from "../rules/listing";
+
+export const POST_COLUMNS = "id, seller_id, title, description, price, allow_offers, photo_path, created_at, sold_at";
+export type PostRow = {
+  id: string; seller_id: string; title: string; description: string; price: number;
+  allow_offers: boolean; photo_path: string; created_at: string; sold_at: string | null;
+};
+export const PHOTO_BUCKET = "book-photos";
+
+export async function listVisiblePosts(sb: SupabaseClient, sellerId?: string): Promise<PostRow[]> {
+  let q = sb.from("posts").select(POST_COLUMNS)
+    .or(`sold_at.is.null,sold_at.gte.${retentionCutoff().toISOString()}`)
+    .order("created_at", { ascending: false }).limit(100);
+  if (sellerId) q = q.eq("seller_id", sellerId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data as PostRow[];
+}
+
+export async function toViews(sb: SupabaseClient, rows: PostRow[], userId: string) {
+  if (rows.length === 0) return [];
+  const { data, error } = await sb.storage.from(PHOTO_BUCKET).createSignedUrls(rows.map((r) => r.photo_path), 600);
+  if (error) throw error;
+  return rows.map((r, i) => ({
+    id: r.id, title: r.title, description: r.description, price: r.price, allowOffers: r.allow_offers,
+    createdAt: r.created_at, soldAt: r.sold_at, status: statusLabel(r.sold_at),
+    isMine: r.seller_id === userId, photoUrl: data[i]?.signedUrl ?? null,
+  }));
+}
+
+=== app/api/auth/signup/route.ts ===
+import { isSchoolEmail } from "@/lib/rules/email";
+import { text } from "@/lib/rules/validate";
+import { env } from "@/lib/server/env";
+import { clientIp, handle, HttpError } from "@/lib/server/http";
+import { rateLimit } from "@/lib/server/rateLimit";
+import { serverSupabase } from "@/lib/server/supabase";
+
+export const POST = handle(async (req: Request) => {
+  if (!rateLimit(`signup:${clientIp(req)}`, 5, 15 * 60_000)) throw new HttpError(429, "잠시 후 다시 시도해 주세요.");
+  const body = await req.json().catch(() => { throw new HttpError(400, "잘못된 요청입니다."); });
+  const email = text(body.email, "이메일", 3, 254);
+  const password = text(body.password, "비밀번호", 8, 72);
+  if (!email.ok) throw new HttpError(400, email.error);
+  if (!password.ok) throw new HttpError(400, password.error);
+  if (!isSchoolEmail(email.value, env("SCHOOL_EMAIL_DOMAIN")))
+    throw new HttpError(400, `@${env("SCHOOL_EMAIL_DOMAIN")} 학교 이메일로만 가입할 수 있습니다.`);
+  const sb = await serverSupabase();
+  const { error } = await sb.auth.signUp({
+    email: email.value, password: password.value,
+    options: { emailRedirectTo: `${env("SITE_URL")}/auth/callback` },
+  });
+  if (error) throw new HttpError(400, error.message);
+  return Response.json({ message: "인증 메일을 보냈습니다. 메일의 링크를 눌러 가입을 완료해 주세요." });
+});
+
+=== app/api/auth/login/route.ts ===
+import { text } from "@/lib/rules/validate";
+import { clientIp, handle, HttpError } from "@/lib/server/http";
+import { rateLimit } from "@/lib/server/rateLimit";
+import { assertMember } from "@/lib/server/session";
+import { serverSupabase } from "@/lib/server/supabase";
+
+export const POST = handle(async (req: Request) => {
+  if (!rateLimit(`login:${clientIp(req)}`, 10, 15 * 60_000)) throw new HttpError(429, "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+  const body = await req.json().catch(() => { throw new HttpError(400, "잘못된 요청입니다."); });
+  const email = text(body.email, "이메일", 3, 254);
+  const password = text(body.password, "비밀번호", 1, 72);
+  if (!email.ok || !password.ok) throw new HttpError(400, "이메일과 비밀번호를 입력해 주세요.");
+  const sb = await serverSupabase();
+  const { data, error } = await sb.auth.signInWithPassword({ email: email.value, password: password.value });
+  if (error || !data.user) throw new HttpError(401, "이메일 또는 비밀번호가 올바르지 않거나 메일 인증이 끝나지 않았습니다.");
+  try {
+    assertMember(data.user);
+  } catch (e) {
+    await sb.auth.signOut();
+    throw e;
+  }
+  return Response.json({ ok: true });
+});
+
+=== app/api/auth/logout/route.ts ===
+import { handle } from "@/lib/server/http";
+import { serverSupabase } from "@/lib/server/supabase";
+
+export const POST = handle(async () => {
+  const { error } = await (await serverSupabase()).auth.signOut();
+  if (error) throw error;
+  return Response.json({ ok: true });
+});
+
+=== app/auth/callback/route.ts ===
+import { NextResponse } from "next/server";
+import { serverSupabase } from "@/lib/server/supabase";
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  if (code) {
+    const { error } = await (await serverSupabase()).auth.exchangeCodeForSession(code);
+    if (!error) return NextResponse.redirect(new URL("/", url.origin));
+    console.error(error);
+  }
+  return NextResponse.redirect(new URL("/login?error=verify", url.origin));
+}
+
+=== app/api/posts/route.ts ===
+import { randomUUID } from "crypto";
+import { parseListing } from "@/lib/rules/listing";
+import { detectImage, MAX_PHOTO_BYTES } from "@/lib/rules/upload";
+import { handle, HttpError } from "@/lib/server/http";
+import { listVisiblePosts, PHOTO_BUCKET, toViews } from "@/lib/server/posts";
+import { requireMember } from "@/lib/server/session";
+
+export const GET = handle(async () => {
+  const { supabase, user } = await requireMember();
+  return Response.json(await toViews(supabase, await listVisiblePosts(supabase), user.id));
+});
+
+export const POST = handle(async (req: Request) => {
+  const { supabase, user } = await requireMember();
+  const form = await req.formData();
+  const listing = parseListing(Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === "string")));
+  if (!listing.ok) throw new HttpError(400, listing.error);
+  const photo = form.get("photo");
+  if (!(photo instanceof File) || photo.size === 0) throw new HttpError(400, "책 사진을 첨부해 주세요.");
+  if (photo.size > MAX_PHOTO_BYTES) throw new HttpError(413, "사진은 5MB 이하만 올릴 수 있습니다.");
+  const bytes = new Uint8Array(await photo.arrayBuffer());
+  const type = detectImage(bytes);
+  if (!type) throw new HttpError(415, "JPG, PNG, WEBP 사진만 올릴 수 있습니다.");
+  const path = `${user.id}/${randomUUID()}.${type.ext}`;
+  const up = await supabase.storage.from(PHOTO_BUCKET).upload(path, bytes, { contentType: type.mime });
+  if (up.error) throw up.error;
+  const { title, description, price, allowOffers } = listing.value;
+  const { data, error } = await supabase.from("posts")
+    .insert({ seller_id: user.id, title, description, price, allow_offers: allowOffers, photo_path: path })
+    .select("id").single();
+  if (error) {
+    const rm = await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    if (rm.error) console.error("orphan photo cleanup failed", path, rm.error);
+    throw error;
+  }
+  return Response.json({ id: data.id }, { status: 201 });
+});
+
+=== app/api/posts/[id]/route.ts ===
+import { isVisible } from "@/lib/rules/listing";
+import { handle, HttpError } from "@/lib/server/http";
+import { POST_COLUMNS, PostRow, toViews } from "@/lib/server/posts";
+import { requireMember } from "@/lib/server/session";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function loadPost(sb: Awaited<ReturnType<typeof requireMember>>["supabase"], id: string): Promise<PostRow> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new HttpError(404, "게시글을 찾을 수 없습니다.");
+  const { data, error } = await sb.from("posts").select(POST_COLUMNS).eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!data || !isVisible(data.sold_at)) throw new HttpError(404, "게시글을 찾을 수 없습니다.");
+  return data as PostRow;
+}
+
+export const GET = handle(async (_req: Request, ctx: Ctx) => {
+  const { supabase, user } = await requireMember();
+  const post = await loadPost(supabase, (await ctx.params).id);
+  const [view] = await toViews(supabase, [post], user.id);
+  return Response.json(view);
+});
+
+=== app/api/posts/[id]/offers/route.ts ===
+import { offerBlockReason, parseOfferAmount } from "@/lib/rules/offer";
+import { handle, HttpError } from "@/lib/server/http";
+import { requireMember } from "@/lib/server/session";
+import { loadPost } from "../route";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+export const GET = handle(async (_req: Request, ctx: Ctx) => {
+  const { supabase, user } = await requireMember();
+  const post = await loadPost(supabase, (await ctx.params).id);
+  if (post.seller_id !== user.id) throw new HttpError(403, "판매자만 제안 목록을 볼 수 있습니다.");
+  const { data, error } = await supabase.from("offers").select("id, amount, created_at")
+    .eq("post_id", post.id).order("created_at", { ascending: false });
+  if (error) throw error;
+  return Response.json(data);
+});
+
+export const POST = handle(async (req: Request, ctx: Ctx) => {
+  const { supabase, user } = await requireMember();
+  const post = await loadPost(supabase, (await ctx.params).id);
+  const blocked = offerBlockReason(post, user.id);
+  if (blocked) throw new HttpError(400, blocked);
+  const body = await req.json().catch(() => { throw new HttpError(400, "잘못된 요청입니다."); });
+  const amount = parseOfferAmount(body.amount);
+  if (!amount.ok) throw new HttpError(400, amount.error);
+  const { error } = await supabase.from("offers").insert({ post_id: post.id, buyer_id: user.id, amount: amount.value });
+  if (error?.code === "23505") throw new HttpError(409, "이미 이 게시글에 가격을 제안했습니다.");
+  if (error) throw error;
+  return Response.json({ ok: true }, { status: 201 });
+});
+
+=== app/api/posts/[id]/sold/route.ts ===
+import { handle, HttpError } from "@/lib/server/http";
+import { requireMember } from "@/lib/server/session";
+import { loadPost } from "../route";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+export const POST = handle(async (_req: Request, ctx: Ctx) => {
+  const { supabase, user } = await requireMember();
+  const post = await loadPost(supabase, (await ctx.params).id);
+  if (post.seller_id !== user.id) throw new HttpError(403, "판매자만 판매 완료로 바꿀 수 있습니다.");
+  if (post.sold_at) throw new HttpError(409, "이미 판매 완료된 게시글입니다.");
+  const { error } = await supabase.from("posts").update({ sold_at: new Date().toISOString() })
+    .eq("id", post.id).eq("seller_id", user.id).is("sold_at", null);
+  if (error) throw error;
+  return Response.json({ ok: true });
+});
+
+=== app/api/me/posts/route.ts ===
+import { handle } from "@/lib/server/http";
+import { listVisiblePosts, toViews } from "@/lib/server/posts";
+import { requireMember } from "@/lib/server/session";
+
+export const GET = handle(async () => {
+  const { supabase, user } = await requireMember();
+  return Response.json(await toViews(supabase, await listVisiblePosts(supabase, user.id), user.id));
+});
+
+=== lib/client/api.ts ===
+export async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => ({ error: `요청 실패 (${res.status})` }));
+  if (!res.ok) throw new Error(body.error ?? `요청 실패 (${res.status})`);
+  return body as T;
+}
+
+export type PostView = {
+  id: string; title: string; description: string; price: number; allowOffers: boolean;
+  createdAt: string; soldAt: string | null; status: string; isMine: boolean; photoUrl: string | null;
+};
+
+=== components/PostList.tsx ===
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { api, PostView } from "@/lib/client/api";
+
+export function PostList({ source }: { source: string }) {
+  const [posts, setPosts] = useState<PostView[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => { api<PostView[]>(source).then(setPosts).catch((e) => setError(e.message)); }, [source]);
+  if (error) return <p role="alert">{error}</p>;
+  if (!posts) return <p>불러오는 중…</p>;
+  if (posts.length === 0) return <p>게시글이 없습니다.</p>;
+  return (
+    <ul>
+      {posts.map((p) => (
+        <li key={p.id}>
+          <Link href={`/posts/${p.id}`}>{p.title}</Link> · {p.price.toLocaleString()}원 · {p.status}
+          {p.allowOffers && !p.soldAt ? " · 가격 제안 가능" : ""}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+=== components/AuthForm.tsx ===
+"use client";
+import { FormEvent, useState } from "react";
+import { api } from "@/lib/client/api";
+
+export function AuthForm({ endpoint, submitLabel, onDone }: { endpoint: string; submitLabel: string; onDone: (msg?: string) => void }) {
+  const [msg, setMsg] = useState("");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    try {
+      const r = await api<{ message?: string }>(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: f.get("email"), password: f.get("password") }),
+      });
+      onDone(r.message);
+    } catch (err) { setMsg((err as Error).message); }
+  }
+  return (
+    <form onSubmit={submit}>
+      <input name="email" type="email" placeholder="학교 이메일" required />
+      <input name="password" type="password" placeholder="비밀번호 (8자 이상)" required />
+      <button>{submitLabel}</button>
+      {msg && <p role="alert">{msg}</p>}
+    </form>
+  );
+}
+
+=== app/layout.tsx ===
+import Link from "next/link";
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko"><body>
+      <nav><Link href="/">교재 장터</Link> | <Link href="/posts/new">판매글 쓰기</Link> | <Link href="/me">마이페이지</Link> | <Link href="/login">로그인</Link></nav>
+      <main>{children}</main>
+    </body></html>
+  );
+}
+
+=== app/page.tsx ===
+import { PostList } from "@/components/PostList";
+export default function Home() {
+  return <><h1>중고 교재 게시판</h1><PostList source="/api/posts" /></>;
+}
+
+=== app/me/page.tsx ===
+import { PostList } from "@/components/PostList";
+export default function MyPage() {
+  return <><h1>내 판매글</h1><p>판매 완료 글은 30일 동안 보입니다.</p><PostList source="/api/me/posts" /></>;
+}
+
+=== app/login/page.tsx ===
+"use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AuthForm } from "@/components/AuthForm";
+export default function Login() {
+  const router = useRouter();
+  return <><h1>로그인</h1><AuthForm endpoint="/api/auth/login" submitLabel="로그인" onDone={() => router.push("/")} /><Link href="/signup">회원가입</Link></>;
+}
+
+=== app/signup/page.tsx ===
+"use client";
+import { useState } from "react";
+import { AuthForm } from "@/components/AuthForm";
+export default function Signup() {
+  const [done, setDone] = useState("");
+  if (done) return <p>{done}</p>;
+  return <><h1>회원가입</h1><AuthForm endpoint="/api/auth/signup" submitLabel="인증 메일 받기" onDone={(m) => setDone(m ?? "")} /></>;
+}
+
+=== app/posts/new/page.tsx ===
+"use client";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/client/api";
+
+export default function NewPost() {
+  const router = useRouter();
+  const [msg, setMsg] = useState("");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    try {
+      const r = await api<{ id: string }>("/api/posts", { method: "POST", body: new FormData(e.currentTarget) });
+      router.push(`/posts/${r.id}`);
+    } catch (err) { setMsg((err as Error).message); }
+  }
+  return (
+    <form onSubmit={submit}>
+      <h1>판매글 쓰기</h1>
+      <input name="title" placeholder="교재 제목" maxLength={100} required />
+      <textarea name="description" placeholder="상태, 필기 여부 등" maxLength={2000} />
+      <input name="price" type="number" min={0} step={1} placeholder="판매 가격(원)" required />
+      <label><input type="radio" name="allowOffers" value="true" required /> 가격 제안 받기</label>
+      <label><input type="radio" name="allowOffers" value="false" /> 가격 제안 안 받기</label>
+      <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required />
+      <button>등록</button>
+      {msg && <p role="alert">{msg}</p>}
+    </form>
+  );
+}
+
+=== app/posts/[id]/page.tsx ===
+"use client";
+import { FormEvent, use, useCallback, useEffect, useState } from "react";
+import { api, PostView } from "@/lib/client/api";
+
+type Offer = { id: string; amount: number; created_at: string };
+
+export default function PostDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [post, setPost] = useState<PostView | null>(null);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [msg, setMsg] = useState("");
+  const fail = (e: Error) => setMsg(e.message);
+
+  const load = useCallback(async () => {
+    const p = await api<PostView>(`/api/posts/${id}`);
+    setPost(p);
+    if (p.isMine) setOffers(await api<Offer[]>(`/api/posts/${id}/offers`));
+  }, [id]);
+  useEffect(() => { load().catch(fail); }, [load]);
+
+  async function offer(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const amount = new FormData(e.currentTarget).get("amount");
+    await api(`/api/posts/${id}/offers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) })
+      .then(() => setMsg("가격을 제안했습니다.")).catch(fail);
+  }
+  async function markSold() {
+    await api(`/api/posts/${id}/sold`, { method: "POST" }).then(load).catch(fail);
+  }
+
+  if (!post) return <p role="alert">{msg || "불러오는 중…"}</p>;
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      {post.photoUrl && <img src={post.photoUrl} alt={post.title} width={320} />}
+      <p>{post.price.toLocaleString()}원 · {post.status}</p>
+      <p style={{ whiteSpace: "pre-wrap" }}>{post.description}</p>
+      {!post.isMine && post.allowOffers && !post.soldAt && (
+        <form onSubmit={offer}>
+          <input name="amount" type="number" min={1} step={1} placeholder="제안 가격(원)" required />
+          <button>가격 제안</button>
+        </form>
+      )}
+      {post.isMine && (
+        <section>
+          <h2>받은 가격 제안</h2>
+          {offers.length === 0 ? <p>아직 없습니다.</p> :
+            <ul>{offers.map((o) => <li key={o.id}>{o.amount.toLocaleString()}원</li>)}</ul>}
+          {!post.soldAt && <button onClick={markSold}>판매 완료로 변경</button>}
+        </section>
+      )}
+      {msg && <p role="alert">{msg}</p>}
+    </article>
+  );
+}
