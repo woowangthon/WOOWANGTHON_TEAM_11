@@ -32,7 +32,7 @@
 ## 검증
 - 사양서 유무 비교 (요청 3건): 사양서가 있으면 환경변수 사용·입력 검증·파일 분리가 **3건 모두** 지켜짐(없으면 0건). 첫 시도 출력 토큰은 줄지 않음 → [docs/experiment/INTERPRETATION.md](docs/experiment/INTERPRETATION.md)
 - 왕복 횟수 실험(위반 0까지 몇 번 다시 요청하나, 코딩은 맥락 없는 Claude 서브에이전트): 사양서가 있으면 두 요청 모두 **첫 답에서 위반 0**, 없으면 수정 요청 2회·1회 → [docs/experiment/rounds-agent/INTERPRETATION.md](docs/experiment/rounds-agent/INTERPRETATION.md)
-- 규모 판정 점검(기대 규모를 정한 요청 9개): 최종 9/9 일치 → [docs/experiment/difficulty/README.md](docs/experiment/difficulty/README.md)
+- 규모 판정 점검(기대 규모를 정한 요청 10개, 11/4): AI 단독 9/10, 규칙 보정 후 최종 10/10 일치 → [docs/experiment/difficulty/README.md](docs/experiment/difficulty/README.md)
 - 요청 수가 적어 통계가 아닌 경향 확인 수준. AI 적용·미검증 범위는 [docs/SCOPE.md](docs/SCOPE.md)
 
 ## AI 제공자와 API 키
