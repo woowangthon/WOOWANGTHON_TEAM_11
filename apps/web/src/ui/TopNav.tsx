@@ -21,7 +21,7 @@ export function TopNav<T extends string>({ steps, current, reachedIndex, onStep,
     <header className="Nav">
       <div className="NavBrand">
         <span className="NavDot" />
-        사전 설계 동료
+        Preflight
       </div>
       <nav className="NavSteps" aria-label="진행 단계">
         {steps.map((s, i) => (
