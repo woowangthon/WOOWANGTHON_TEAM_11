@@ -6,14 +6,14 @@
 - 6단계 웹 화면: 요청 → 갈림길 → 규칙 → 사양서(사양서 / 작업·난이도 / 예산 / 보안 확인 탭) → 보드 → 점검
 - AI 응답 검증·정규화 (`packages/core/src/cards.ts`, `tasks.ts`, `feasibility.ts`, `features.ts`, `review.ts`): 모델 출력의 키·값을 고정된 어휘로 검사하고, 잘못된 항목은 그 항목만 버림 (카드 하나, 점검 항목 하나, 판정 하나가 전체를 버리지 않게)
 - 프로필 계산과 규칙 추천 (`profile.ts`, `recommend.ts`, `presets/`): 규칙 기반, 결정적. 유지보수 규칙 9종·보안 규칙 10종 문구
-- 프로젝트 규모 판정의 규칙 바닥 (`feasibility.ts`): 암호화폐·금융·의료는 기업급, 실시간 대규모·결제·마켓·판매 계획은 최소 팀. 목적(개인/공개/판매) 명시 감지
+- 프로젝트 규모 판정의 규칙 바닥 (`feasibility.ts`): 암호화폐·금융·의료·AI 생성물 판별은 기업급, 모델 직접 학습(목소리·그림체·사투리 등)·실시간 채팅·대규모 동시 접속·결제·마켓·판매 계획은 최소 팀. 목적(개인/공개/판매) 명시 감지
 - 작업 난이도 보정 (`calibrateDifficulty`): 성능·결제·실시간 같은 주제는 '상'으로 올림. 스택 겹침 경고 (`stackWarnings`)
 - 사양서 조립 (`spec.ts`, 영/한), 번역 대상 추출과 되돌리기 (`translatableTexts` / `withTexts`), 남은 한글 줄 재번역·집계 (`translate.ts`)
 - 스킬 카탈로그 (`skills.ts`): 도메인·범용 구분, 프로필 기반 추천, AI 선택과 규칙 추천 합치기 (`mergeSkills`)
 - 작업 보드 (`board.ts`): 보안 확인을 체크하지 않으면 완료로 못 옮김, 브라우저에만 저장
-- OpenAI 호환 LLM 클라이언트와 모델 폴백 (`llm.ts`), 사용자 키 제공자 허용 목록 (`providers.ts`)
+- OpenAI 호환 LLM 클라이언트와 모델 폴백, 요청당 시간 제한(22초 안에 못 끝내면 기본값과 사유 표시) (`llm.ts`), 사용자 키 제공자 허용 목록 (`providers.ts`)
 - 요청 핸들러(입력 검증·요청 횟수 제한, `apps/web/server/handlers.ts`), 배포 빌드 스크립트 (`scripts/build-vercel.mjs`)
-- 비교 실험 스크립트 (`scripts/experiment*.ts`, `scripts/eval-difficulty.ts`)
+- 비교 실험 스크립트 (`scripts/experiment*.ts`, `scripts/eval-difficulty.ts`, `scripts/eval-hidden-hard.ts`)
 
 ## 외부 기술 (API·라이브러리·모델)
 - Google Gemini API (OpenAI 호환 엔드포인트), 모델 `gemini-flash-lite-latest` → `gemini-flash-latest`
