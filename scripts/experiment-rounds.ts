@@ -43,6 +43,10 @@ const OUT = AGENT ? 'docs/experiment/rounds-agent' : 'docs/experiment/rounds';
 const REQUESTS = [
   '동아리 회비 관리 앱. 회원별 납부 여부를 보고 미납자에게 알림을 보내고 싶어',
   '스터디 모임 출석체크랑 벌금 정산해주는 웹사이트',
+  // Added 11/14 to widen the sample beyond two requests.
+  '우리 학교 학생끼리 중고 교재 사고파는 게시판. 학교 이메일로만 가입',
+  '헬스장 PT 예약하고 회원권 남은 횟수를 관리하는 앱',
+  '팀 프로젝트 과제 마감일과 역할 분담을 같이 보는 웹앱',
 ];
 
 const CODER_SYSTEM = `You are an AI coding agent. Build what is asked.
@@ -146,6 +150,8 @@ for (const [i, request] of REQUESTS.entries()) {
     writeFileSync(specFile, JSON.stringify(setup, null, 2));
   }
   const rules = ALL_RULES.filter((r) => setup.ruleIds.includes(r.id));
+  // SPEC_ONLY=1 prepares every spec up front so the coding agents can run side by side.
+  if (process.env.SPEC_ONLY) continue;
 
   console.log(`request ${i + 1}`);
   const plain = await runCondition('plain', request, rules, `${OUT}/${i + 1}-plain.json`);
@@ -159,7 +165,7 @@ for (const [i, request] of REQUESTS.entries()) {
 
 const report = `# 왕복 횟수 실험 (#6)
 
-- 실행일: ${new Date().toISOString().slice(0, 10)}
+- 실행일: 요청 1~2는 2026-11-02, 요청 3~5는 2026-11-14 (같은 절차로 추가)
 - 코딩 역할 모델: ${CODER_MODEL} / 점검 모델: 서비스와 동일 (gemini-flash-lite-latest)
 - 절차: 코드 생성 → 사후 점검 → 위반이 있으면 수정 요청문(서비스 6단계와 동일)으로 다시 요청, 최대 ${MAX_FIX_ROUNDS}회
 - 점검 기준 규칙은 양쪽 조건 동일 (서비스가 그 요청에 추천한 규칙)
