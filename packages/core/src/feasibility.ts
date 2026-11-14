@@ -31,7 +31,17 @@ const FLOORS: { pattern: RegExp; tier: Tier; reason: string }[] = [
     reason: 'AI 생성물 판별은 아직 풀리지 않은 연구 문제예요. 새 생성 모델이 나올 때마다 다시 학습해야 하고, 사람 그림을 AI로 잘못 판정하면 실제 피해가 생겨서 "정확한 확률"을 혼자 보장할 수 없어요.',
   },
   {
-    pattern: /실시간\s?(멀티|대전|게임)|mmo|동시\s?접속\s?(수천|수만|만)|대규모\s?트래픽/i,
+    // 11/14 check (docs/experiment/hidden-hard): "learn my drawing style", "understand dialect" came
+    // back "personal, just call an API". Training a model is a different job from calling one.
+    pattern:
+      /(목소리|음성|음색|그림체|화풍|얼굴|글씨체|필체|말투|울음\s?소리).{0,20}(학습|훈련|복제|클론|흉내|따라\s?하|로\s?(노래|읽어|말해|그려|만들))|(학습|훈련)\s?(시켜|시킨|시키|해서).{0,25}(ai|인공지능|모델|그려|불러|만들)|(ai|인공지능|모델).{0,20}(학습\s?시|훈련\s?시|직접\s?학습)|(모델|ai)(을|를)?\s?(직접|새로)\s?(학습|훈련)|파인\s?튜닝|fine-?tun|(사투리|방언|수어|수화).{0,25}(인식|알아듣|이해|번역|바꿔)|(사진|영상|소리|데이터)(을|를)?\s?(모아|수집).{0,25}(ai|인공지능|모델|자동으로\s?(찾|분류|판별))/i,
+    tier: 'team',
+    reason:
+      '이미 있는 AI를 불러 쓰는 게 아니라 모델을 직접 학습시켜야 하는 서비스예요. 데이터를 모으고 정리하는 일, 학습용 GPU 비용, 결과가 얼마나 맞는지 검증하는 일이 따로 필요해서 혼자 AI 코딩 도구만으로 끝내기 어렵습니다. 먼저 기존 AI API로 되는지 확인해 보세요.',
+  },
+  {
+    // Real-time chat was judged "personal" twice in the 11/14 repeat check (docs/experiment/difficulty-repeat).
+    pattern: /실시간\s?(멀티|대전|게임|단체\s?채팅|채팅|메신저)|mmo|동시\s?접속\s?(수천|수만|만)|대규모\s?트래픽/i,
     tier: 'team',
     reason: '많은 사람이 동시에 쓰는 실시간 기능은 서버 설계와 부하 테스트가 필요해 혼자 AI와 만들기엔 벅찹니다.',
   },
