@@ -36,3 +36,31 @@ test('a failed call never puts the key into the error', async () => {
     assert.ok(!text.includes(KEY), `${provider} leaked the key: ${text}`);
   }
 });
+
+test('past the deadline no model is called and the error says the AI took too long', async () => {
+  let calls = 0;
+  const fetchStub = (async () => {
+    calls++;
+    return new Response('{}');
+  }) as typeof fetch;
+  await assert.rejects(
+    chatJson({ baseUrl: 'https://example.test', apiKey: 'k', models: ['a', 'b'], fetch: fetchStub, deadline: Date.now() - 1 }, 's', 'u'),
+    (err: Error) => err.message === 'AI took too long',
+  );
+  assert.equal(calls, 0);
+});
+
+test('a slow first model leaves the second one out instead of running past the deadline', async () => {
+  const seen: string[] = [];
+  const fetchStub = (async (_url: unknown, init?: RequestInit) => {
+    seen.push(JSON.parse(String(init?.body)).model);
+    await new Promise((r) => setTimeout(r, 120));
+    return new Response('', { status: 503 });
+  }) as typeof fetch;
+  // 1.55s of budget: enough to start the first call, under the 1.5s minimum once it has answered.
+  await assert.rejects(
+    chatJson({ baseUrl: 'https://example.test', apiKey: 'k', models: ['a', 'b'], fetch: fetchStub, deadline: Date.now() + 1_550 }, 's', 'u'),
+    (err: Error) => err.message === 'AI took too long',
+  );
+  assert.deepEqual(seen, ['a']);
+});

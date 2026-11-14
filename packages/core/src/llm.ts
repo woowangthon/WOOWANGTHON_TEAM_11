@@ -11,6 +11,22 @@ export interface LlmConfig {
   models: string[];
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Epoch ms after which no new attempt starts and a running one is cut off. The edge runtime kills
+   * a function that has not answered in 25s with a raw platform error; stopping first lets the
+   * caller fall back to its labelled default instead (seen 11/14 under a slow free model).
+   */
+  deadline?: number;
+}
+
+// Not worth starting a model call with less than this left.
+const MIN_ATTEMPT_MS = 1_500;
+/** Time this attempt may take, or null when the deadline leaves no room for one. */
+function attemptMs(config: LlmConfig, fallback: number): number | null {
+  const own = config.timeoutMs ?? fallback;
+  if (config.deadline === undefined) return own;
+  const left = config.deadline - Date.now();
+  return left < MIN_ATTEMPT_MS ? null : Math.min(own, left);
 }
 
 export interface LlmResult {
@@ -40,6 +56,11 @@ export async function chatJson(config: LlmConfig, system: string, user: string):
   const attempts: string[] = [];
 
   for (const model of config.models) {
+    const ms = attemptMs(config, 30_000);
+    if (ms === null) {
+      attempts.push(`${model}: skipped, out of time`);
+      break;
+    }
     let res: Response;
     try {
       res = await doFetch(`${config.baseUrl}/chat/completions`, {
@@ -54,7 +75,7 @@ export async function chatJson(config: LlmConfig, system: string, user: string):
           response_format: { type: 'json_object' },
           temperature: 0.4,
         }),
-        signal: AbortSignal.timeout(config.timeoutMs ?? 30_000),
+        signal: AbortSignal.timeout(ms),
       });
     } catch (err) {
       attempts.push(`${model}: ${(err as Error).message}`);
@@ -81,21 +102,22 @@ export async function chatJson(config: LlmConfig, system: string, user: string):
       : null;
     return { text, model, usage };
   }
-  throw new LlmError('all models failed', attempts);
+  throw new LlmError(attempts.some((a) => a.endsWith('out of time')) ? 'AI took too long' : 'all models failed', attempts);
 }
 
 // Opus/Sonnet tiers accept server-side refusal fallbacks; Haiku has none.
 const supportsFallback = (model: string) => /^claude-(opus|sonnet)-/.test(model);
 
 async function chatAnthropic(config: LlmConfig, system: string, user: string): Promise<LlmResult> {
-  const client = new Anthropic({
-    apiKey: config.apiKey,
-    fetch: config.fetch,
-    timeout: config.timeoutMs ?? 60_000,
-    maxRetries: 1,
-  });
   const attempts: string[] = [];
   for (const model of config.models) {
+    const ms = attemptMs(config, 60_000);
+    if (ms === null) {
+      attempts.push(`${model}: skipped, out of time`);
+      break;
+    }
+    // With a deadline there is no room for the SDK's own retry on top of ours.
+    const client = new Anthropic({ apiKey: config.apiKey, fetch: config.fetch, timeout: ms, maxRetries: config.deadline === undefined ? 1 : 0 });
     try {
       const fallback = supportsFallback(model);
       const response = await client.beta.messages.create({
@@ -132,7 +154,7 @@ async function chatAnthropic(config: LlmConfig, system: string, user: string): P
       attempts.push(`${model}: connection failed`);
     }
   }
-  throw new LlmError('all models failed', attempts);
+  throw new LlmError(attempts.some((a) => a.endsWith('out of time')) ? 'AI took too long' : 'all models failed', attempts);
 }
 
 /**

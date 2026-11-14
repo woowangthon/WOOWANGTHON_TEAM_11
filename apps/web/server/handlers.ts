@@ -29,11 +29,16 @@ export type Env = Record<string, string | undefined>;
 export type Byok = ByokInput;
 export const NO_BYOK: Byok = { provider: null, key: null, model: null };
 
+const REQUEST_BUDGET_MS = 22_000;
+
 /** The user's own key when one was sent (validated, fixed provider URL), else the server's. */
 export function llmConfig(env: Env, byok: Byok = NO_BYOK): LlmConfig {
+  // Under the edge runtime's 25s limit, with room left to send the labelled fallback.
+  const deadline = Date.now() + REQUEST_BUDGET_MS;
   const own = byokConfig(byok);
-  if (own) return own;
+  if (own) return { ...own, deadline };
   return {
+    deadline,
     baseUrl: env.LLM_BASE_URL || GEMINI_OPENAI_BASE,
     apiKey: env.LLM_API_KEY || env.GEMINI_API_KEY || '',
     // Lite first: this service's whole claim is that the cheap model does the prep work.
